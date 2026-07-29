@@ -1,0 +1,15 @@
+{
+  "name": "plan-that-party",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A friendly project-management platform for coordinating a big annual Halloween party — volunteers, tasks, supplies, and reaching each helper on the channel they prefer.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:local": "wrangler d1 execute plan-that-party --local --file=./schema.sql",
+    "db:remote": "wrangler d1 execute plan-that-party --remote --file=./schema.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  }
+}
