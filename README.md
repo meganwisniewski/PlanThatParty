@@ -40,15 +40,19 @@ npm run dev            # http://localhost:8787
 
 ## Deploy it (real URL your friends can open)
 
+The D1 database is **already provisioned and seeded** on your Cloudflare
+account (its id is in `wrangler.toml`), so deploying is just:
+
 ```bash
-npx wrangler login                     # opens Cloudflare auth in your browser
-npx wrangler d1 create plan-that-party # copy the returned database_id...
-# ...paste it into wrangler.toml under [[d1_databases]] database_id
-npx wrangler d1 execute plan-that-party --remote --file=./schema.sql
+npx wrangler login     # opens Cloudflare auth in your browser
 npm run deploy
 ```
 
 Wrangler prints your live URL (e.g. `https://plan-that-party.<you>.workers.dev`).
+
+> Starting over on a fresh Cloudflare account instead? Run
+> `npx wrangler d1 create plan-that-party`, paste the new id into
+> `wrangler.toml`, then `npm run db:remote` to load the schema before deploying.
 
 ## First things to do after deploy
 

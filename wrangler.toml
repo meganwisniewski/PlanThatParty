@@ -9,9 +9,9 @@ directory = "./public"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 
-# D1 (SQLite) database. After `wrangler d1 create plan-that-party`,
-# paste the returned database_id below.
+# D1 (SQLite) database — already provisioned on your Cloudflare account
+# and seeded with the starter template.
 [[d1_databases]]
 binding = "DB"
 database_name = "plan-that-party"
-database_id = "PASTE_DATABASE_ID_HERE"
+database_id = "cb5dcec1-9acf-4451-8554-a21c7ac947ce"
