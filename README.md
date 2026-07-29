@@ -6,16 +6,18 @@ Built to be **calm, low-friction, and ADHD-friendly**: a zoom **Focus Dial** let
 
 ---
 
-## What it does today (v0.1)
+## What it does today (v0.2)
 
-- **Dashboard** — progress, what needs an owner, what's blocked, budget, progress by area.
-- **🎛️ Focus Dial** — turn the dial to zoom: *Whole party → Every area → One area → One thing.* The "one thing" view is a calm single-task spotlight. The dial is on the volunteer page too.
-- **Tasks** — assign to people, set status/priority/due dates, filter by area/person/status.
-- **People** — the crew, each with a **preferred channel** (email, text, iMessage, WhatsApp, phone, in-person, calendar) + platform, and a **private share link** that shows them only their tasks.
-- **Supplies & budget** — track items, who's buying, estimated cost, purchased status.
-- **Feedback** — the 💬 button anyone can tap; you triage it in the Feedback tab.
-- **Volunteer view** (`/me/<link>`) — no login; each person sees just their stuff and can update status.
-- Seeded with a **starter Halloween planning template** (10 areas + a checklist) so it's useful on day one.
+A **Smartsheet-style, three-zone work app** (left nav · main canvas · slide-in detail panel) on a calm light theme — see `DESIGN.md` for the design system it's built on.
+
+- **Scannable task grid** — grouped by area with collapsible headers + rollup %, columns for Owner / Status / Priority / Due / %, inline editing, and color reserved for status (chips + Harvey-ball glyphs). Also **Board** and **Calendar** views of the same data.
+- **Work produces real facts (relational model)** — a task like *"Lock the party date"* carries the actual date field in its detail panel; saving it completes the task **and** writes the fact to the header countdown, the Overview, and every volunteer's page. Fact-linked tasks (date, time, location, theme, headcount, budget) show a 🔗 badge. This is the core of `DESIGN.md` §6.
+- **🎛️ Focus Dial as a density control** — zoom *Overview → Working → One task*; the deepest zoom is a calm single-task "Now mode." On the volunteer page too.
+- **Overview dashboard** — party-at-a-glance facts, metric tiles, a status donut, and progress-by-area bars.
+- **People** — each with a **preferred channel** (email, text, iMessage, WhatsApp, phone, in-person, calendar) + platform, and a **private share link** showing only their tasks.
+- **Subtasks, supplies & budget, and an always-on 💬 feedback button** on every screen.
+- **Volunteer view** (`/me/<link>`) — no login; each person sees only their part and can update status.
+- Seeded with a **starter Halloween planning template** (10 areas + a fact-aware checklist).
 
 Channels are captured and respected now; **automated sending** (email digests, SMS, calendar invites) is the next iteration — see `ROADMAP.md`.
 

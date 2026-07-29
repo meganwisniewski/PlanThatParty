@@ -214,7 +214,7 @@ async function api(request, env, path) {
   // ---------- party ----------
   if (resource === "party" && method === "PATCH") {
     const b = await body(request);
-    await updateRow(env, "party", 1, pick(b, ["name", "event_date", "start_time", "location", "notes", "admin_pin"]));
+    await updateRow(env, "party", 1, pick(b, ["name", "event_date", "start_time", "location", "theme", "headcount_target", "budget_target", "notes", "admin_pin"]));
     return json({ ok: true });
   }
 
@@ -281,21 +281,38 @@ async function api(request, env, path) {
   }
 
   // ---------- tasks ----------
+  const FACT_FIELDS = ["event_date", "start_time", "location", "theme", "headcount_target", "budget_target"];
   if (resource === "tasks") {
+    // POST /api/tasks/:id/fulfill { value } — atomically write the linked
+    // party fact AND complete the task, so finishing the work updates the
+    // single source of truth everywhere at once.
+    if (method === "POST" && id && seg[3] === "fulfill") {
+      const task = await env.DB.prepare("SELECT * FROM tasks WHERE id = ?").bind(id).first();
+      if (!task) return err("No such task.", 404);
+      if (!FACT_FIELDS.includes(task.links_field)) return err("This task isn't linked to a fact.");
+      const { value } = await body(request);
+      const v = value === "" ? null : value;
+      await env.DB.prepare(`UPDATE party SET ${task.links_field} = ? WHERE id = 1`).bind(v).run();
+      await env.DB.prepare("UPDATE tasks SET status = 'done', percent = 100 WHERE id = ?").bind(id).run();
+      return json({ ok: true });
+    }
     if (method === "POST") {
       const b = await body(request);
       if (!b.title) return err("Title required.");
       const r = await env.DB.prepare(
-        `INSERT INTO tasks (area_id, title, description, status, priority, due_date, assignee_id)
-         VALUES (?,?,?,?,?,?,?)`
+        `INSERT INTO tasks (area_id, parent_id, title, description, status, priority, due_date, percent, links_field, assignee_id)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`
       )
         .bind(
           b.area_id || null,
+          b.parent_id || null,
           b.title,
           b.description || null,
           b.status || "todo",
           b.priority || "normal",
           b.due_date || null,
+          b.percent || 0,
+          b.links_field || null,
           b.assignee_id || null
         )
         .run();
@@ -307,11 +324,12 @@ async function api(request, env, path) {
         env,
         "tasks",
         id,
-        pick(b, ["area_id", "title", "description", "status", "priority", "due_date", "assignee_id"])
+        pick(b, ["area_id", "parent_id", "title", "description", "status", "priority", "due_date", "percent", "links_field", "assignee_id"])
       );
       return json({ ok: true });
     }
     if (method === "DELETE" && id) {
+      await env.DB.prepare("DELETE FROM tasks WHERE parent_id = ?").bind(id).run();
       await env.DB.prepare("DELETE FROM tasks WHERE id = ?").bind(id).run();
       return json({ ok: true });
     }

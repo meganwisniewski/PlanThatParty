@@ -2,13 +2,16 @@
 -- Safe to re-run: it only seeds when tables are empty.
 
 CREATE TABLE IF NOT EXISTS party (
-  id          INTEGER PRIMARY KEY,
-  name        TEXT NOT NULL,
-  event_date  TEXT,
-  start_time  TEXT,
-  location    TEXT,
-  notes       TEXT,
-  admin_pin   TEXT
+  id               INTEGER PRIMARY KEY,
+  name             TEXT NOT NULL,
+  event_date       TEXT,
+  start_time       TEXT,
+  location         TEXT,
+  theme            TEXT,
+  headcount_target INTEGER,
+  budget_target    REAL,
+  notes            TEXT,
+  admin_pin        TEXT
 );
 
 CREATE TABLE IF NOT EXISTS areas (
@@ -35,11 +38,14 @@ CREATE TABLE IF NOT EXISTS people (
 CREATE TABLE IF NOT EXISTS tasks (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   area_id     INTEGER REFERENCES areas(id) ON DELETE SET NULL,
+  parent_id   INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
   title       TEXT NOT NULL,
   description TEXT,
   status      TEXT DEFAULT 'todo',           -- todo | claimed | in_progress | blocked | done
   priority    TEXT DEFAULT 'normal',         -- low | normal | high
   due_date    TEXT,
+  percent     INTEGER DEFAULT 0,             -- 0..100
+  links_field TEXT,                          -- a party fact this task fills in (event_date, location, theme, headcount_target, budget_target, start_time)
   assignee_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
   created_at  TEXT DEFAULT (datetime('now'))
 );
@@ -93,28 +99,34 @@ WHERE NOT EXISTS (SELECT 1 FROM areas);
 
 -- ---------- Seed: a starter checklist (only if tasks empty) ----------
 -- Resolves area_id by area name so it stays correct regardless of ids.
-INSERT INTO tasks (area_id, title, description, priority)
-SELECT a.id, v.column2, v.column3, v.column4
+-- column5 = links_field: when set, this task fills in a real party fact,
+-- and completing it in the detail panel writes that fact everywhere.
+INSERT INTO tasks (area_id, title, description, priority, links_field)
+SELECT a.id, v.column2, v.column3, v.column4, v.column5
 FROM (VALUES
-  ('Logistics & Timeline','Lock the party date & time','Confirm with hosts and put it on the shared calendar','high'),
-  ('Logistics & Timeline','Build the day-of run-of-show','Hour-by-hour: setup, doors, food, contest, cleanup','normal'),
-  ('Logistics & Timeline','Recruit volunteer leads for each area','One point-person per area so it is not all on the hosts','high'),
-  ('Guests & Invites','Finalize the guest list','Get the list from hosts; estimate headcount','high'),
-  ('Guests & Invites','Send invitations','Pick the invite method and send; track RSVPs','normal'),
-  ('Food','Plan the menu','Decide catered vs potluck; note dietary needs','high'),
-  ('Food','Coordinate potluck sign-ups','Who is bringing what — avoid five bowls of chips','normal'),
-  ('Drinks','Plan drinks & quantities','Alcoholic + non-alcoholic, cups, ice, water','normal'),
-  ('Decor & Ambiance','Decide the theme & decor plan','Set the vibe; make a decor shopping list','normal'),
-  ('Decor & Ambiance','Schedule the decorating crew','Who decorates and when','normal'),
-  ('Music & AV','Build the playlist','Collaborative playlist + backup speaker','low'),
-  ('Activities & Costumes','Plan the costume contest','Categories, judges, prizes, timing','normal'),
-  ('Activities & Costumes','Set up a photo spot','Backdrop + props + someone to take photos','low'),
-  ('Setup & Teardown','Recruit a setup crew','People who can arrive early','normal'),
-  ('Setup & Teardown','Recruit a teardown crew','People who can stay to clean up','normal'),
-  ('Safety & Comfort','Sort parking & rides','Parking plan and a rideshare-home plan','normal'),
-  ('Safety & Comfort','Note allergies & first aid','Collect allergy info; know where the first-aid kit is','normal'),
-  ('Budget','Set the budget','Agree a number with hosts and track against it','high'),
-  ('Budget','Set up reimbursements','How volunteers get paid back for what they buy','normal')
+  ('Logistics & Timeline','Lock the party date & time','Confirm with hosts and put it on the shared calendar','high','event_date'),
+  ('Logistics & Timeline','Set the start time','When do doors open?','normal','start_time'),
+  ('Logistics & Timeline','Confirm the location','Address or venue for the party','high','location'),
+  ('Logistics & Timeline','Build the day-of run-of-show','Hour-by-hour: setup, doors, food, contest, cleanup','normal',NULL),
+  ('Logistics & Timeline','Recruit volunteer leads for each area','One point-person per area so it is not all on the hosts','high',NULL),
+  ('Guests & Invites','Set the headcount target','Roughly how many people are we planning for?','high','headcount_target'),
+  ('Guests & Invites','Finalize the guest list','Get the list from hosts; confirm who is coming','high',NULL),
+  ('Guests & Invites','Send invitations','Pick the invite method and send; track RSVPs','normal',NULL),
+  ('Food','Plan the menu','Decide catered vs potluck; note dietary needs','high',NULL),
+  ('Food','Coordinate potluck sign-ups','Who is bringing what — avoid five bowls of chips','normal',NULL),
+  ('Drinks','Plan drinks & quantities','Alcoholic + non-alcoholic, cups, ice, water','normal',NULL),
+  ('Decor & Ambiance','Decide the theme','Set the vibe for the whole party','normal','theme'),
+  ('Decor & Ambiance','Make the decor plan & shopping list','What goes where; what to buy','normal',NULL),
+  ('Decor & Ambiance','Schedule the decorating crew','Who decorates and when','normal',NULL),
+  ('Music & AV','Build the playlist','Collaborative playlist + backup speaker','low',NULL),
+  ('Activities & Costumes','Plan the costume contest','Categories, judges, prizes, timing','normal',NULL),
+  ('Activities & Costumes','Set up a photo spot','Backdrop + props + someone to take photos','low',NULL),
+  ('Setup & Teardown','Recruit a setup crew','People who can arrive early','normal',NULL),
+  ('Setup & Teardown','Recruit a teardown crew','People who can stay to clean up','normal',NULL),
+  ('Safety & Comfort','Sort parking & rides','Parking plan and a rideshare-home plan','normal',NULL),
+  ('Safety & Comfort','Note allergies & first aid','Collect allergy info; know where the first-aid kit is','normal',NULL),
+  ('Budget','Set the budget','Agree a number with hosts and track against it','high','budget_target'),
+  ('Budget','Set up reimbursements','How volunteers get paid back for what they buy','normal',NULL)
 ) AS v
 JOIN areas a ON a.name = v.column1
 WHERE NOT EXISTS (SELECT 1 FROM tasks);
