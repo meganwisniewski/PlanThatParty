@@ -44,6 +44,19 @@ const FACT_META = {
   budget_target: { label: "Budget ($)", type: "number", field: "budget_target", ph: "e.g. 500" },
 };
 const channelLabel = (c) => CHANNELS[c] || c || "—";
+const REMIND_OPTS = [[0, "At start"], [60, "1 hour before"], [1440, "1 day before"], [10080, "1 week before"]];
+const reminderSet = (csv) => String(csv || "").split(",").map((s) => parseInt(s, 10)).filter((n) => !isNaN(n));
+function googleCalUrl(party) {
+  if (!party || !party.calStart) return null;
+  const p = new URLSearchParams();
+  p.set("action", "TEMPLATE");
+  p.set("text", party.name || "Halloween Party");
+  p.set("dates", `${party.calStart}/${party.calEnd}`);
+  if (!party.calAllDay) { try { p.set("ctz", Intl.DateTimeFormat().resolvedOptions().timeZone); } catch {} }
+  if (party.notes) p.set("details", party.notes);
+  if (party.location) p.set("location", party.location);
+  return "https://calendar.google.com/calendar/render?" + p.toString();
+}
 
 /* ---------------- state ---------------- */
 const state = {
@@ -344,6 +357,13 @@ function overview() {
         ${d.areas.map((a) => { const at = tasks.filter((t) => t.area_id === a.id); const ad = at.filter((t) => t.status === "done").length; const p = at.length ? Math.round((ad / at.length) * 100) : 0; return `<div class="arow"><div class="an">${a.emoji || ""} ${esc(a.name)}</div><div class="at"><div style="width:${p}%"></div></div><div class="ap">${ad}/${at.length}</div></div>`; }).join("")}
       </div>
     </div>
+    ${party.event_date ? `<div class="facts"><h2>📅 Share the party calendar</h2>
+      <div class="countdown" style="margin-bottom:10px">Anyone can add it — no login needed. Great to share alongside your invite graphic.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${googleCalUrl(party) ? `<a class="btn primary" href="${googleCalUrl(party)}" target="_blank" rel="noopener">Add to Google Calendar</a>` : ""}
+        <a class="btn" href="/api/calendar/party.ics">Download .ics (Apple / Outlook)</a>
+        <button class="btn ghost" data-copy-cal>Copy shareable link</button>
+      </div></div>` : ""}
     <div class="facts"><h2>Jump to</h2><div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn" data-saved="unassigned">◎ ${unassigned} need an owner</button>
       <button class="btn" data-saved="blocked">⊘ ${blocked} blocked</button>
@@ -502,6 +522,7 @@ function wireCanvas() {
   // overview jumps handled by data-saved/data-screen above (re-query)
   appEl.querySelectorAll("[data-screen]").forEach((b) => (b.onclick = () => { state.screen = b.dataset.screen; render(); if (state.screen === "feedback") mountFeedback(); }));
   appEl.querySelectorAll("[data-saved]").forEach((b) => (b.onclick = () => { state.screen = "work"; state.dial = 1; state.filter = { areaId: null, saved: b.dataset.saved || null, q: "" }; render(); }));
+  const cc = $("[data-copy-cal]"); if (cc) cc.onclick = () => { const url = location.origin + "/api/calendar/party.ics"; navigator.clipboard.writeText(url).then(() => toast("Calendar link copied")).catch(() => prompt("Copy:", url)); };
   // spotlight
   appEl.querySelectorAll("[data-spot-status]").forEach((b) => (b.onclick = async () => { await patch("/api/tasks/" + b.dataset.id, { status: b.dataset.spotStatus }); await refresh(); render(); toast("Updated"); }));
   appEl.querySelectorAll("[data-spot-nav]").forEach((b) => (b.onclick = () => { const pool = spotlightPool(); const idx = pool.findIndex((x) => x.id === state.selectedTaskId); const nx = pool[idx + Number(b.dataset.spotNav)]; if (nx) { state.selectedTaskId = nx.id; render(); } }));
@@ -580,26 +601,70 @@ async function mountFeedback() {
   let items; try { items = await get("/api/feedback"); } catch (e) { mount.innerHTML = `<div class="empty">${esc(e.message)}${e.status === 401 ? ` — <button class="btn small" id="pinBtn">Enter PIN</button>` : ""}</div>`; const pb = $("#pinBtn"); if (pb) pb.onclick = askPin; return; }
   const icon = { love: "❤️", idea: "💡", confusing: "😕", bug: "🐞" };
   mount.innerHTML = `<div class="section-title">What people are telling us (${items.length})</div>
-    <div class="grid-wrap" style="padding:14px">${items.length ? items.map((f) => `<div class="fbrow"><div class="fm"><div>${icon[f.sentiment] || "💬"} ${esc(f.message)}</div><div class="meta">${esc(f.person_name || f.author_name || "Anonymous")} · ${esc((f.created_at || "").replace("T", " ").slice(0, 16))} ${f.page ? `· ${esc(f.page)}` : ""}</div></div>
+    <div class="grid-wrap" style="padding:14px">${items.length ? items.map((f) => `<div class="fbrow"><div class="fm"><div>${icon[f.sentiment] || "💬"} ${esc(f.message)}</div>${f.target ? `<div class="meta" style="color:var(--accent-strong)">🎯 ${esc(f.target)}</div>` : ""}<div class="meta">${esc(f.person_name || f.author_name || "Anonymous")} · ${esc((f.created_at || "").replace("T", " ").slice(0, 16))} ${f.page ? `· ${esc(f.page)}` : ""}</div></div>
       <select class="cell-sel" style="width:auto" data-fb="${f.id}">${["new", "reviewed", "done"].map((s) => `<option ${s === f.status ? "selected" : ""}>${s}</option>`).join("")}</select></div>`).join("") : `<div class="empty">No feedback yet — it shows up the moment someone taps 💬.</div>`}</div>`;
   mount.querySelectorAll("[data-fb]").forEach((s) => (s.onchange = async (e) => { await patch("/api/feedback/" + s.dataset.fb, { status: e.target.value }); toast("Updated"); }));
 }
 
-/* ---------------- feedback widget ---------------- */
-let fbSentiment = null;
-function openFeedback() {
-  fbSentiment = null;
-  const person = fab.dataset.person, name = fab.dataset.name || "";
-  modal(`<h3>How's this working?</h3><p class="hint">Confusing, broken, an idea, or just love — goes straight to the coordinator.</p>
-    <div class="sentiments"><button class="btn" data-sent="love">❤️ Love</button><button class="btn" data-sent="idea">💡 Idea</button><button class="btn" data-sent="confusing">😕 Confusing</button><button class="btn" data-sent="bug">🐞 Bug</button></div>
-    ${person ? "" : `<label class="field"><span>Your name (optional)</span><input id="fbName" value="${esc(name)}"/></label>`}
-    <label class="field"><span>Your feedback</span><textarea id="fbMsg" rows="3" placeholder="Tell me what you're seeing…"></textarea></label>`,
+/* ---------------- feedback widget (with element picker) ---------------- */
+let fbState = null, fbCloseModal = null;
+function openFeedback(prefill) {
+  fbState = { sentiment: (prefill && prefill.sentiment) || null, message: (prefill && prefill.text) || "", target: null, authorName: fab.dataset.name || "" };
+  showFeedbackModal();
+}
+function saveFbInputs() { const m = $("#fbMsg"); if (m) fbState.message = m.value; const n = $("#fbName"); if (n) fbState.authorName = n.value; }
+function showFeedbackModal() {
+  const person = fab.dataset.person;
+  const sents = [["love", "❤️ Love"], ["idea", "💡 Idea"], ["confusing", "😕 Confusing"], ["bug", "🐞 Bug"]];
+  fbCloseModal = modal(`<h3>How's this working?</h3><p class="hint">Confusing, broken, an idea, or just love — goes straight to the coordinator.</p>
+    <div class="sentiments">${sents.map(([v, l]) => `<button class="btn ${fbState.sentiment === v ? "sel" : ""}" data-sent="${v}">${l}</button>`).join("")}</div>
+    <label class="field"><span>What's this about?</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <div id="fbTgt" style="flex:1;font-size:13px;color:${fbState.target ? "var(--ink)" : "var(--muted)"};background:var(--surface-2);border-radius:8px;padding:8px 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fbState.target ? "🎯 " + esc(fbState.target) : "The whole page"}</div>
+        <button type="button" class="btn small" id="fbPick">🎯 Point to it</button>
+        ${fbState.target ? `<button type="button" class="btn small ghost" id="fbClr">✕</button>` : ""}
+      </div>
+    </label>
+    ${person ? "" : `<label class="field"><span>Your name (optional)</span><input id="fbName" value="${esc(fbState.authorName)}"/></label>`}
+    <label class="field"><span>Your feedback</span><textarea id="fbMsg" rows="3" placeholder="Tell me what you're seeing…">${esc(fbState.message)}</textarea></label>`,
     async () => {
-      const msg = $("#fbMsg").value.trim(); if (!msg) return toast("Type something 🙂");
-      await post("/api/feedback", { message: msg, sentiment: fbSentiment, page: location.pathname, person_id: person || null, author_name: person ? null : ($("#fbName") ? $("#fbName").value.trim() : null) });
+      saveFbInputs();
+      if (!fbState.message.trim()) throw new Error("Type something first 🙂");
+      await post("/api/feedback", { message: fbState.message.trim(), sentiment: fbState.sentiment, page: location.pathname, target: fbState.target, person_id: person || null, author_name: person ? null : (fbState.authorName || null) });
       toast("Thank you! 🙏"); if (state.screen === "feedback") mountFeedback();
     });
-  document.querySelectorAll(".sentiments [data-sent]").forEach((b) => b.addEventListener("click", () => { fbSentiment = b.dataset.sent; document.querySelectorAll(".sentiments [data-sent]").forEach((x) => x.classList.remove("sel")); b.classList.add("sel"); }));
+  document.querySelectorAll(".sentiments [data-sent]").forEach((b) => (b.onclick = () => { fbState.sentiment = b.dataset.sent; document.querySelectorAll(".sentiments [data-sent]").forEach((x) => x.classList.remove("sel")); b.classList.add("sel"); }));
+  const pick = $("#fbPick"); if (pick) pick.onclick = () => { saveFbInputs(); fbCloseModal(); startElementPick(); };
+  const clr = $("#fbClr"); if (clr) clr.onclick = () => { saveFbInputs(); fbState.target = null; fbCloseModal(); showFeedbackModal(); };
+}
+function describeEl(el) {
+  const txt = (el.innerText || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 50);
+  const tag = el.tagName.toLowerCase();
+  const path = []; let n = el, depth = 0;
+  while (n && n.nodeType === 1 && n !== document.body && depth < 4) {
+    let s = n.tagName.toLowerCase();
+    if (n.id) s += "#" + n.id;
+    else if (typeof n.className === "string" && n.className.trim()) s += "." + n.className.trim().split(/\s+/)[0];
+    path.unshift(s); n = n.parentElement; depth++;
+  }
+  return (txt ? `"${txt}" ` : "") + `[${tag} · ${path.join(">")}]`;
+}
+function startElementPick() {
+  const hint = document.createElement("div");
+  hint.textContent = "Click the thing you want feedback about  ·  Esc to cancel";
+  Object.assign(hint.style, { position: "fixed", top: "0", left: "0", right: "0", zIndex: "99999", background: "#7c3aed", color: "#fff", font: "600 13px -apple-system,sans-serif", padding: "11px", textAlign: "center", pointerEvents: "none" });
+  const hl = document.createElement("div");
+  Object.assign(hl.style, { position: "fixed", zIndex: "99998", background: "rgba(124,58,237,0.14)", border: "2px solid #7c3aed", borderRadius: "4px", pointerEvents: "none", display: "none" });
+  document.body.appendChild(hint); document.body.appendChild(hl);
+  document.body.style.cursor = "crosshair";
+  let cur = null;
+  const move = (e) => { const el = document.elementFromPoint(e.clientX, e.clientY); if (!el || el === hint || el === hl || el === fab) return; cur = el; const r = el.getBoundingClientRect(); Object.assign(hl.style, { left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px", display: "block" }); };
+  const cleanup = () => { document.removeEventListener("mousemove", move, true); document.removeEventListener("click", click, true); document.removeEventListener("keydown", key, true); hint.remove(); hl.remove(); document.body.style.cursor = ""; };
+  const click = (e) => { e.preventDefault(); e.stopImmediatePropagation(); if (cur) fbState.target = describeEl(cur); cleanup(); showFeedbackModal(); };
+  const key = (e) => { if (e.key === "Escape") { e.preventDefault(); cleanup(); showFeedbackModal(); } };
+  document.addEventListener("mousemove", move, true);
+  document.addEventListener("click", click, true);
+  document.addEventListener("keydown", key, true);
 }
 function askPin() { modal(`<h3>Admin PIN</h3><p class="hint">Enter the shared PIN to edit.</p><label class="field"><span>PIN</span><input id="pinInput" type="password"/></label>`, async () => { const v = $("#pinInput").value.trim(); if (!v) return; setPin(v); await renderAdmin(); }); }
 
@@ -646,8 +711,39 @@ async function renderVolunteer(token) {
   const party = d.party || {};
   const when = [party.event_date ? fmtDate(party.event_date) : "", party.start_time].filter(Boolean).join(" · ");
   appEl.innerHTML = `<div class="vol-head"><h1>🎃 ${esc(party.name || "Halloween Party")}</h1><p>Hey ${esc(d.person.name)} — here's just your part${when ? " · " + esc(when) : ""}${party.location ? " · " + esc(party.location) : ""}</p></div>
-    <div class="vol-dial" id="volDialMount"></div><div class="vol-wrap"><div id="volBody"></div></div>`;
-  mountVolDial(); drawVol();
+    <div class="vol-dial" id="volDialMount"></div><div class="vol-wrap">${volCalendarCard()}<div id="volBody"></div></div>`;
+  mountVolDial(); drawVol(); wireVolCalendar();
+}
+
+function volCalendarCard() {
+  const d = volCtx.data, party = d.party || {};
+  if (!party.event_date) return "";
+  const g = googleCalUrl(party);
+  const mins = reminderSet(d.person.reminder_minutes);
+  return `<div class="facts" style="margin-top:14px">
+    <h2>📅 Add the party to your calendar</h2>
+    <div class="countdown" style="margin-bottom:10px">🎃 ${esc(fmtDate(party.event_date))}${party.start_time ? " · " + esc(party.start_time) : ""}${party.location ? " · " + esc(party.location) : ""}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      ${g ? `<a class="btn primary" href="${g}" target="_blank" rel="noopener">Add to Google Calendar</a>` : ""}
+      <a class="btn" href="/api/me/${esc(volCtx.token)}/calendar.ics">Download for Apple / Outlook</a>
+    </div>
+    <div style="font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px">Remind me <span style="font-weight:400">(applies to the downloaded calendar + your tasks)</span></div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap">
+      ${REMIND_OPTS.map(([v, l]) => `<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="checkbox" data-remind="${v}" ${mins.includes(v) ? "checked" : ""} style="width:auto"/> ${l}</label>`).join("")}
+    </div>
+    <div style="margin-top:12px"><button class="btn ghost small" data-cal-issue>Calendar not working? Tell us →</button></div>
+  </div>`;
+}
+function wireVolCalendar() {
+  const host = $(".vol-wrap");
+  if (!host) return;
+  host.querySelectorAll("[data-remind]").forEach((c) => (c.onchange = async () => {
+    const mins = [...host.querySelectorAll("[data-remind]:checked")].map((x) => x.dataset.remind).join(",");
+    const r = await post(`/api/me/${volCtx.token}/reminders`, { minutes: mins });
+    volCtx.data.person.reminder_minutes = r.reminder_minutes;
+    toast("Reminder saved");
+  }));
+  const ci = host.querySelector("[data-cal-issue]"); if (ci) ci.onclick = () => openFeedback({ sentiment: "bug", text: "Calendar issue: " });
 }
 function mountVolDial() { const m = $("#volDialMount"); m.innerHTML = dialMarkup(volCtx.level, VOL_LEVELS, "volDial"); wireDial($("#volDial"), volCtx.level, 3, (l) => { volCtx.level = l; mountVolDial(); drawVol(); }); }
 function drawVol() {

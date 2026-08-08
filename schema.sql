@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS people (
   platform          TEXT,                    -- iphone | android | google | microsoft | other
   channel_notes     TEXT,
   role              TEXT,                    -- host | co-host | lead | volunteer
+  reminder_minutes  TEXT DEFAULT '1440',     -- CSV of minutes-before offsets for calendar alarms
   share_token       TEXT UNIQUE,
   created_at        TEXT DEFAULT (datetime('now'))
 );
@@ -66,6 +67,7 @@ CREATE TABLE IF NOT EXISTS supplies (
 CREATE TABLE IF NOT EXISTS feedback (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   page        TEXT,
+  target      TEXT,                          -- the on-page element the feedback is about
   person_id   INTEGER REFERENCES people(id) ON DELETE SET NULL,
   author_name TEXT,
   message     TEXT NOT NULL,

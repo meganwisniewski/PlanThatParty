@@ -47,6 +47,71 @@ function newToken() {
   return crypto.randomUUID().replace(/-/g, "").slice(0, 20);
 }
 
+// ---- calendar helpers ----------------------------------------------------
+const pad = (n) => String(n).padStart(2, "0");
+
+// Best-effort parse of a free-text start_time ("8:00 PM – 3:00 AM", "7pm",
+// "6:30 PM to 11 PM") into structured start/end for a given event_date.
+// Falls back to an all-day event if it can't read a time.
+function parseEventTimes(party) {
+  if (!party || !party.event_date) return null;
+  const [y, mo, d] = party.event_date.split("-").map(Number);
+  const nextDate = (addDay) => { const dt = new Date(Date.UTC(y, mo - 1, d + (addDay ? 1 : 0))); return `${dt.getUTCFullYear()}${pad(dt.getUTCMonth() + 1)}${pad(dt.getUTCDate())}`; };
+  const raw = (party.start_time || "").trim();
+  const re = /(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?)?/gi;
+  const ms = [...raw.matchAll(re)].filter((m) => m[1]);
+  const to24 = (h, min, ap) => { h = +h; min = min ? +min : 0; ap = (ap || "").toLowerCase(); if (ap[0] === "p" && h < 12) h += 12; if (ap[0] === "a" && h === 12) h = 0; return [h, min]; };
+  if (ms.length >= 1) {
+    const [sh, sm] = to24(ms[0][1], ms[0][2], ms[0][3]);
+    let eh, em;
+    if (ms.length >= 2) [eh, em] = to24(ms[1][1], ms[1][2], ms[1][3]);
+    else { eh = (sh + 3) % 24; em = sm; }
+    const startMin = sh * 60 + sm, endMin = eh * 60 + em;
+    const nextDay = endMin <= startMin;
+    return { allDay: false, start: `${nextDate(false)}T${pad(sh)}${pad(sm)}00`, end: `${nextDate(nextDay)}T${pad(eh)}${pad(em)}00` };
+  }
+  return { allDay: true, start: nextDate(false), end: nextDate(true) };
+}
+
+// Attach client-friendly calendar fields to a party object (non-destructive copy).
+function partyClient(party) {
+  if (!party) return party;
+  const cal = parseEventTimes(party);
+  return Object.assign({}, party, cal ? { calStart: cal.start, calEnd: cal.end, calAllDay: cal.allDay } : {});
+}
+
+function reminderList(csv) {
+  return String(csv || "").split(",").map((s) => parseInt(s, 10)).filter((n) => !isNaN(n) && n >= 0);
+}
+
+const icsEsc = (s) => (s == null ? "" : String(s)).replace(/([,;\\])/g, "\\$1").replace(/\n/g, "\\n");
+
+function icsEvent({ uid, cal, summary, description, location, alarms }) {
+  if (!cal) return "";
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+  const dtS = cal.allDay ? `DTSTART;VALUE=DATE:${cal.start}` : `DTSTART:${cal.start}`;
+  const dtE = cal.allDay ? `DTEND;VALUE=DATE:${cal.end}` : `DTEND:${cal.end}`;
+  const L = ["BEGIN:VEVENT", `UID:${uid}`, `DTSTAMP:${stamp}`, dtS, dtE, `SUMMARY:${icsEsc(summary)}`];
+  if (location) L.push(`LOCATION:${icsEsc(location)}`);
+  if (description) L.push(`DESCRIPTION:${icsEsc(description)}`);
+  (alarms || []).forEach((min) => L.push("BEGIN:VALARM", `TRIGGER:-PT${min}M`, "ACTION:DISPLAY", `DESCRIPTION:${icsEsc(summary)}`, "END:VALARM"));
+  L.push("END:VEVENT");
+  return L.join("\r\n");
+}
+
+function icsCalendar(events) {
+  return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//PlanThatParty//EN", "CALSCALE:GREGORIAN", ...events.filter(Boolean), "END:VCALENDAR"].join("\r\n");
+}
+
+function icsResponse(body, filename) {
+  return new Response(body, { headers: { "content-type": "text/calendar; charset=utf-8", "content-disposition": `attachment; filename="${filename}"` } });
+}
+
+function partyEvent(party, alarms) {
+  const cal = parseEventTimes(party);
+  return icsEvent({ uid: "party-1@planthatparty", cal, summary: `🎃 ${party.name || "Halloween Party"}`, description: party.notes || "", location: party.location || "", alarms });
+}
+
 // Only allow known columns through for a table (guards against bad keys).
 function pick(obj, allowed) {
   const out = {};
@@ -99,14 +164,38 @@ async function api(request, env, path) {
           .bind(person.id)
           .all()
       ).results;
+      const pc = partyClient(party);
       return json({
-        person: { id: person.id, name: person.name, role: person.role },
+        person: { id: person.id, name: person.name, role: person.role, reminder_minutes: person.reminder_minutes || "1440" },
         party: party
-          ? { name: party.name, event_date: party.event_date, start_time: party.start_time, location: party.location }
+          ? { name: pc.name, event_date: pc.event_date, start_time: pc.start_time, location: pc.location, notes: pc.notes, calStart: pc.calStart, calEnd: pc.calEnd, calAllDay: pc.calAllDay }
           : null,
         tasks,
         supplies,
       });
+    }
+
+    // GET /api/me/:token/calendar.ics — the party + this person's due-dated tasks,
+    // with their personal reminder alarms baked in.
+    if (method === "GET" && seg[3] === "calendar.ics") {
+      const party = await getParty(env);
+      const alarms = reminderList(person.reminder_minutes || "1440");
+      const events = [partyEvent(party, alarms)];
+      const dueTasks = (await env.DB.prepare("SELECT * FROM tasks WHERE assignee_id = ? AND due_date IS NOT NULL AND status != 'done'").bind(person.id).all()).results;
+      for (const t of dueTasks) {
+        const [ty, tm, td] = t.due_date.split("-").map(Number);
+        const nd = new Date(Date.UTC(ty, tm - 1, td + 1));
+        events.push(icsEvent({ uid: `task-${t.id}@planthatparty`, cal: { allDay: true, start: `${ty}${pad(tm)}${pad(td)}`, end: `${nd.getUTCFullYear()}${pad(nd.getUTCMonth() + 1)}${pad(nd.getUTCDate())}` }, summary: `🎃 ${t.title}`, description: t.description || "", location: party.location || "", alarms }));
+      }
+      return icsResponse(icsCalendar(events), "my-halloween-tasks.ics");
+    }
+
+    // POST /api/me/:token/reminders { minutes: "1440,60" }
+    if (method === "POST" && seg[3] === "reminders") {
+      const { minutes } = await body(request);
+      const clean = reminderList(minutes).join(",");
+      await env.DB.prepare("UPDATE people SET reminder_minutes = ? WHERE id = ?").bind(clean, person.id).run();
+      return json({ ok: true, reminder_minutes: clean });
     }
 
     // POST /api/me/:token/task/:tid  { status }
@@ -137,15 +226,24 @@ async function api(request, env, path) {
     return err("Not found.", 404);
   }
 
+  // ---------- Public party calendar (.ics), open to everyone ----------
+  if (resource === "calendar") {
+    const party = await getParty(env);
+    if (!party) return err("No party yet.", 404);
+    const url = new URL(request.url);
+    const alarms = reminderList(url.searchParams.get("remind"));
+    return icsResponse(icsCalendar([partyEvent(party, alarms)]), "halloween-party.ics");
+  }
+
   // ---------- Feedback (open to everyone — the whole point) ----------
   if (resource === "feedback") {
     if (method === "POST" && !id) {
       const b = await body(request);
       if (!b.message || !b.message.trim()) return err("Say something first 🙂");
       await env.DB.prepare(
-        "INSERT INTO feedback (page, person_id, author_name, message, sentiment) VALUES (?,?,?,?,?)"
+        "INSERT INTO feedback (page, target, person_id, author_name, message, sentiment) VALUES (?,?,?,?,?,?)"
       )
-        .bind(b.page || null, b.person_id || null, b.author_name || null, b.message.trim(), b.sentiment || null)
+        .bind(b.page || null, b.target || null, b.person_id || null, b.author_name || null, b.message.trim(), b.sentiment || null)
         .run();
       return json({ ok: true }, 201);
     }
@@ -201,7 +299,7 @@ async function api(request, env, path) {
       env.DB.prepare("SELECT COUNT(*) AS n FROM feedback WHERE status = 'new'").first(),
     ]);
     return json({
-      party,
+      party: partyClient(party),
       pinConfigured: !!(party && party.admin_pin),
       areas: areas.results,
       people: people.results,
@@ -270,7 +368,7 @@ async function api(request, env, path) {
         env,
         "people",
         id,
-        pick(b, ["name", "email", "phone", "preferred_channel", "platform", "channel_notes", "role"])
+        pick(b, ["name", "email", "phone", "preferred_channel", "platform", "channel_notes", "role", "reminder_minutes"])
       );
       return json({ ok: true });
     }
