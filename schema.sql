@@ -47,6 +47,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   due_date    TEXT,
   percent     INTEGER DEFAULT 0,             -- 0..100
   links_field TEXT,                          -- a party fact this task fills in (event_date, location, theme, headcount_target, budget_target, start_time)
+  ext_id      TEXT,                          -- stable id from an imported plan (e.g. "t4.7")
+  effort_hours REAL,                         -- estimated hours
+  core        INTEGER DEFAULT 0,             -- load-bearing task flag
   assignee_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
   created_at  TEXT DEFAULT (datetime('now'))
 );
