@@ -98,11 +98,21 @@ function reminderList(csv) {
 
 const icsEsc = (s) => (s == null ? "" : String(s)).replace(/([,;\\])/g, "\\$1").replace(/\n/g, "\\n");
 
+// The party is in Denver — pin timed events to Mountain time so the wall-clock
+// is correct in everyone's calendar regardless of where they add it from.
+const PARTY_TZ = "America/Denver";
+const VTIMEZONE_DENVER = [
+  "BEGIN:VTIMEZONE", "TZID:America/Denver",
+  "BEGIN:DAYLIGHT", "TZOFFSETFROM:-0700", "TZOFFSETTO:-0600", "TZNAME:MDT", "DTSTART:19700308T020000", "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU", "END:DAYLIGHT",
+  "BEGIN:STANDARD", "TZOFFSETFROM:-0600", "TZOFFSETTO:-0700", "TZNAME:MST", "DTSTART:19701101T020000", "RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU", "END:STANDARD",
+  "END:VTIMEZONE",
+].join("\r\n");
+
 function icsEvent({ uid, cal, summary, description, location, alarms }) {
   if (!cal) return "";
   const stamp = new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
-  const dtS = cal.allDay ? `DTSTART;VALUE=DATE:${cal.start}` : `DTSTART:${cal.start}`;
-  const dtE = cal.allDay ? `DTEND;VALUE=DATE:${cal.end}` : `DTEND:${cal.end}`;
+  const dtS = cal.allDay ? `DTSTART;VALUE=DATE:${cal.start}` : `DTSTART;TZID=${PARTY_TZ}:${cal.start}`;
+  const dtE = cal.allDay ? `DTEND;VALUE=DATE:${cal.end}` : `DTEND;TZID=${PARTY_TZ}:${cal.end}`;
   const L = ["BEGIN:VEVENT", `UID:${uid}`, `DTSTAMP:${stamp}`, dtS, dtE, `SUMMARY:${icsEsc(summary)}`];
   if (location) L.push(`LOCATION:${icsEsc(location)}`);
   if (description) L.push(`DESCRIPTION:${icsEsc(description)}`);
@@ -112,7 +122,7 @@ function icsEvent({ uid, cal, summary, description, location, alarms }) {
 }
 
 function icsCalendar(events) {
-  return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//PlanThatParty//EN", "CALSCALE:GREGORIAN", ...events.filter(Boolean), "END:VCALENDAR"].join("\r\n");
+  return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//PlanThatParty//EN", "CALSCALE:GREGORIAN", VTIMEZONE_DENVER, ...events.filter(Boolean), "END:VCALENDAR"].join("\r\n");
 }
 
 function icsResponse(body, filename) {
@@ -121,7 +131,7 @@ function icsResponse(body, filename) {
 
 function partyEvent(party, alarms) {
   const cal = parseEventTimes(party);
-  return icsEvent({ uid: "party-1@planthatparty", cal, summary: `🎃 ${party.name || "Halloween Party"}`, description: party.notes || "", location: party.location || "", alarms });
+  return icsEvent({ uid: "party-1@planthatparty", cal, summary: party.name || "Halloween Party", description: party.cal_details || party.notes || "", location: party.location || "", alarms });
 }
 
 // Only allow known columns through for a table (guards against bad keys).
@@ -178,7 +188,7 @@ async function api(request, env, path) {
       ).results;
       const pc = partyClient(party);
       return json({
-        person: { id: person.id, name: person.name, role: person.role, is_approver: person.is_approver || 0, reminder_minutes: person.reminder_minutes || "1440" },
+        person: { id: person.id, name: person.name, role: person.role, is_approver: person.is_approver || 0, reminder_minutes: person.reminder_minutes || "" },
         party: party
           ? { name: pc.name, event_date: pc.event_date, start_time: pc.start_time, location: pc.location, notes: pc.notes, calStart: pc.calStart, calEnd: pc.calEnd, calAllDay: pc.calAllDay }
           : null,
@@ -191,7 +201,7 @@ async function api(request, env, path) {
     // with their personal reminder alarms baked in.
     if (method === "GET" && seg[3] === "calendar.ics") {
       const party = await getParty(env);
-      const alarms = reminderList(person.reminder_minutes || "1440");
+      const alarms = reminderList(person.reminder_minutes || "");
       const events = [partyEvent(party, alarms)];
       const dueTasks = (await env.DB.prepare("SELECT * FROM tasks WHERE assignee_id = ? AND due_date IS NOT NULL AND status != 'done'").bind(person.id).all()).results;
       for (const t of dueTasks) {
@@ -394,7 +404,7 @@ async function api(request, env, path) {
   // ---------- party ----------
   if (resource === "party" && method === "PATCH") {
     const b = await body(request);
-    await updateRow(env, "party", 1, pick(b, ["name", "event_date", "start_time", "location", "theme", "headcount_target", "budget_target", "notes", "admin_pin"]));
+    await updateRow(env, "party", 1, pick(b, ["name", "event_date", "start_time", "location", "theme", "headcount_target", "budget_target", "notes", "cal_details", "admin_pin"]));
     return json({ ok: true });
   }
 

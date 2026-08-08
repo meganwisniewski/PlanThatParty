@@ -53,8 +53,9 @@ function googleCalUrl(party) {
   p.set("action", "TEMPLATE");
   p.set("text", party.name || "Halloween Party");
   p.set("dates", `${party.calStart}/${party.calEnd}`);
-  if (!party.calAllDay) { try { p.set("ctz", Intl.DateTimeFormat().resolvedOptions().timeZone); } catch {} }
-  if (party.notes) p.set("details", party.notes);
+  if (!party.calAllDay) p.set("ctz", "America/Denver"); // party is in Denver — pin to Mountain time
+  const det = party.cal_details || party.notes;
+  if (det) p.set("details", det);
   if (party.location) p.set("location", party.location);
   return "https://calendar.google.com/calendar/render?" + p.toString();
 }
@@ -521,6 +522,7 @@ function settingsView() {
       <div class="field two"><label><span>Theme</span><input id="stTheme" value="${esc(p.theme || "")}"/></label><label><span>Headcount target</span><input id="stHead" type="number" value="${p.headcount_target != null ? esc(p.headcount_target) : ""}"/></label></div>
       <label class="field"><span>Budget ($)</span><input id="stBudget" type="number" value="${p.budget_target != null ? esc(p.budget_target) : ""}"/></label>
       <label class="field"><span>Note to the crew</span><textarea id="stNotes" rows="2">${esc(p.notes || "")}</textarea></label>
+      <label class="field"><span>📅 Calendar event details</span><textarea id="stCal" rows="6" placeholder="This is exactly what shows up when anyone adds the party to their calendar — address, timing, costume note, parking, ride plan, etc.">${esc(p.cal_details || "")}</textarea><div style="font-size:11px;color:var(--faint);margin-top:4px">Shows in the "Add to calendar" event (Google, Apple, Outlook). Edit freely — it updates every link.</div></label>
       <button class="btn primary" data-save-party>Save details</button>
     </div>
     <div class="facts" style="margin-top:14px"><h2>Admin PIN</h2>
@@ -579,7 +581,7 @@ function wireCanvas() {
   appEl.querySelectorAll("[data-del-person]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this person?")) return; await del("/api/people/" + b.dataset.delPerson); await refresh(); render(); }));
   appEl.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = () => { const url = location.origin + "/me/" + b.dataset.copy; navigator.clipboard.writeText(url).then(() => toast("Link copied")).catch(() => prompt("Copy:", url)); }));
   // settings
-  const spb = $("[data-save-party]"); if (spb) spb.onclick = async () => { await patch("/api/party", { name: $("#stName").value.trim(), event_date: $("#stDate").value || null, start_time: $("#stTime").value.trim() || null, location: $("#stLoc").value.trim() || null, theme: $("#stTheme").value.trim() || null, headcount_target: $("#stHead").value ? Number($("#stHead").value) : null, budget_target: $("#stBudget").value ? Number($("#stBudget").value) : null, notes: $("#stNotes").value.trim() || null }); await refresh(); render(); toast("Saved"); };
+  const spb = $("[data-save-party]"); if (spb) spb.onclick = async () => { await patch("/api/party", { name: $("#stName").value.trim(), event_date: $("#stDate").value || null, start_time: $("#stTime").value.trim() || null, location: $("#stLoc").value.trim() || null, theme: $("#stTheme").value.trim() || null, headcount_target: $("#stHead").value ? Number($("#stHead").value) : null, budget_target: $("#stBudget").value ? Number($("#stBudget").value) : null, notes: $("#stNotes").value.trim() || null, cal_details: $("#stCal").value.trim() || null }); await refresh(); render(); toast("Saved"); };
   const pinb = $("[data-save-pin]"); if (pinb) pinb.onclick = async () => { const v = $("#stPin").value.trim(); if (!v) return toast("Type a PIN"); await patch("/api/party", { admin_pin: v }); setPin(v); await refresh(); render(); toast("PIN saved"); };
 }
 

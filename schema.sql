@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS party (
   headcount_target INTEGER,
   budget_target    REAL,
   notes            TEXT,
+  cal_details      TEXT,                     -- editable text shown in calendar-link events
   admin_pin        TEXT
 );
 
@@ -32,7 +33,7 @@ CREATE TABLE IF NOT EXISTS people (
   channel_notes     TEXT,
   role              TEXT,                    -- host | co-host | lead | volunteer
   is_approver       INTEGER DEFAULT 0,       -- can moderate the ideas pipeline from their own link
-  reminder_minutes  TEXT DEFAULT '1440',     -- CSV of minutes-before offsets for calendar alarms
+  reminder_minutes  TEXT DEFAULT '',         -- CSV of minutes-before offsets for calendar alarms (empty = none)
   share_token       TEXT UNIQUE,
   created_at        TEXT DEFAULT (datetime('now'))
 );
