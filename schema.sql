@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS people (
   platform          TEXT,                    -- iphone | android | google | microsoft | other
   channel_notes     TEXT,
   role              TEXT,                    -- host | co-host | lead | volunteer
+  is_approver       INTEGER DEFAULT 0,       -- can moderate the ideas pipeline from their own link
   reminder_minutes  TEXT DEFAULT '1440',     -- CSV of minutes-before offsets for calendar alarms
   share_token       TEXT UNIQUE,
   created_at        TEXT DEFAULT (datetime('now'))

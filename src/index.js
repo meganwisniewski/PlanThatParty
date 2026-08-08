@@ -35,6 +35,18 @@ async function requireAdmin(request, env) {
   return err("Wrong or missing admin PIN.", 401);
 }
 
+// Idea moderation is allowed for the admin PIN OR any approver's share token.
+async function requireApprover(request, env) {
+  const gate = await requireAdmin(request, env);
+  if (!gate) return null;
+  const tok = request.headers.get("x-approver-token");
+  if (tok) {
+    const p = await env.DB.prepare("SELECT is_approver FROM people WHERE share_token = ?").bind(tok).first();
+    if (p && p.is_approver) return null;
+  }
+  return gate;
+}
+
 // Look up a person by their private share token.
 async function personByToken(env, token) {
   if (!token) return null;
@@ -166,7 +178,7 @@ async function api(request, env, path) {
       ).results;
       const pc = partyClient(party);
       return json({
-        person: { id: person.id, name: person.name, role: person.role, reminder_minutes: person.reminder_minutes || "1440" },
+        person: { id: person.id, name: person.name, role: person.role, is_approver: person.is_approver || 0, reminder_minutes: person.reminder_minutes || "1440" },
         party: party
           ? { name: pc.name, event_date: pc.event_date, start_time: pc.start_time, location: pc.location, notes: pc.notes, calStart: pc.calStart, calEnd: pc.calEnd, calAllDay: pc.calAllDay }
           : null,
@@ -307,8 +319,8 @@ async function api(request, env, path) {
       await env.DB.prepare("INSERT INTO idea_comments (idea_id, author_name, author_person_id, body) VALUES (?,?,?,?)").bind(id, b.author_name || null, b.author_person_id || null, b.body.trim()).run();
       return json({ ok: true }, 201);
     }
-    // admin-only from here
-    const gate = await requireAdmin(request, env);
+    // moderation: admin PIN or an approver's token
+    const gate = await requireApprover(request, env);
     if (gate) return gate;
     if (method === "PATCH" && id) {
       const b = await body(request);
@@ -438,7 +450,7 @@ async function api(request, env, path) {
         env,
         "people",
         id,
-        pick(b, ["name", "email", "phone", "preferred_channel", "platform", "channel_notes", "role", "reminder_minutes"])
+        pick(b, ["name", "email", "phone", "preferred_channel", "platform", "channel_notes", "role", "is_approver", "reminder_minutes"])
       );
       return json({ ok: true });
     }

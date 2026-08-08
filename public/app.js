@@ -13,6 +13,7 @@ const setPin = (p) => localStorage.setItem(PIN_KEY, p);
 async function apiFetch(path, opts = {}) {
   const headers = Object.assign({ "content-type": "application/json" }, opts.headers || {});
   if (getPin()) headers["x-admin-pin"] = getPin();
+  if (window.__approverToken) headers["x-approver-token"] = window.__approverToken;
   const res = await fetch(path, Object.assign({}, opts, { headers }));
   let data = null; try { data = await res.json(); } catch {}
   if (!res.ok) throw Object.assign(new Error((data && data.error) || res.statusText), { status: res.status });
@@ -64,6 +65,15 @@ const IS_EMOJI = { submitted: "💡", screening: "🔍", approved: "✅", promot
 const IS_COLOR = { submitted: "#b45309", screening: "#1d4ed8", approved: "#15803d", promoted: "#7c3aed", declined: "#b42318", parked: "#5c6470" };
 function voterKey() { let k = localStorage.getItem("ptp_voter"); if (!k) { k = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)); localStorage.setItem("ptp_voter", k); } return k; }
 let ideasData = [];
+// A distinct identity color per planning area/phase (feedback: colored pills, not grey).
+const AREA_PALETTE = ["#ea6a1e", "#7c3aed", "#2563eb", "#0891b2", "#16a34a", "#ca8a04", "#dc2626", "#db2777", "#4f46e5", "#0d9488"];
+function areaColor(a) {
+  if (!a) return "#9ca3af";
+  let idx = a.sort_order ? a.sort_order - 1 : 0;
+  if (!a.sort_order && state.data) idx = state.data.areas.findIndex((x) => x.id === a.id);
+  return AREA_PALETTE[((idx % AREA_PALETTE.length) + AREA_PALETTE.length) % AREA_PALETTE.length];
+}
+const areaColorById = (id) => areaColor((state.data && state.data.areas.find((x) => x.id === id)) || null);
 
 /* ---------------- state ---------------- */
 const state = {
@@ -155,9 +165,8 @@ function sidebar() {
     const at = tasksAll().filter((t) => t.area_id === a.id);
     const done = at.filter((t) => t.status === "done").length;
     const pct = at.length ? Math.round((done / at.length) * 100) : 0;
-    const color = pct === 100 ? "#15803d" : at.some((t) => t.status === "blocked") ? "#b42318" : at.some((t) => !t.assignee_id && t.status !== "done") ? "#eab308" : "#c3c8d0";
     const active = state.screen === "work" && state.filter.areaId === a.id;
-    return `<button class="nav-item ${active ? "active" : ""}" data-area="${a.id}"><span class="emoji">${a.emoji || "📌"}</span> ${esc(a.name)} <span class="rollup" style="background:${color}"></span></button>`;
+    return `<button class="nav-item ${active ? "active" : ""}" data-area="${a.id}"><span class="rollup" style="background:${areaColor(a)};margin-left:0;margin-right:2px"></span> ${esc(a.name)} <span class="count">${pct}%</span></button>`;
   };
   const viewItem = (key, emoji, label, count) =>
     `<button class="nav-item ${state.screen === "work" && state.filter.saved === key ? "active" : ""}" data-saved="${key}"><span class="emoji">${emoji}</span> ${label}${count != null ? `<span class="count">${count}</span>` : ""}</button>`;
@@ -165,7 +174,7 @@ function sidebar() {
   const blocked = tasksAll().filter((t) => t.status === "blocked").length;
   return `
   <nav class="nav ${state.navOpen ? "open" : ""}">
-    <div class="brand"><span class="pk">🎃</span> PlanThatParty</div>
+    <div class="brand"><span class="pk">🎃</span> Josephween</div>
     <button class="nav-item ${state.screen === "work" && state.dial === 0 ? "active" : ""}" data-overview><span class="emoji">◱</span> Overview</button>
     <div class="nav-group"><div class="lbl">Planning areas</div>
       ${d.areas.map(areaItem).join("")}
@@ -207,7 +216,7 @@ function topbar(party, cd) {
       ${state.dial === 1 ? `<span class="countdown">${esc(scope)}</span>
       ${state.view !== "board" ? `<button class="btn small ghost" data-toggle-done>${state.showDone ? "☑ Showing done" : "☐ Show done"}</button>` : ""}
       <div class="viewswitch">
-        ${["grid", "board", "calendar"].map((v) => `<button class="${state.view === v ? "on" : ""}" data-view="${v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join("")}
+        ${["grid", "board", "calendar", "timeline"].map((v) => `<button class="${state.view === v ? "on" : ""}" data-view="${v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join("")}
       </div>` : ""}
     </div>` : ""}
   </div>`;
@@ -222,6 +231,7 @@ function canvas() {
   if (state.dial === 2) return spotlight();
   if (state.view === "board") return boardView();
   if (state.view === "calendar") return calendarView();
+  if (state.view === "timeline") return timelineView();
   return gridView();
 }
 
@@ -250,7 +260,7 @@ function gridView() {
       ? shown.map((r) => taskRow(r.t, ++n, r.depth)).join("") + (hiddenDone ? `<tr><td colspan="7" style="padding:6px 12px;color:var(--faint);font-size:12px">${hiddenDone} completed ${hiddenDone === 1 ? "task" : "tasks"} hidden</td></tr>` : "")
       : rows.length ? `<tr><td colspan="7"><div class="empty" style="padding:14px">🎉 All ${rows.length} done in ${esc(a.name)}.</div></td></tr>`
       : `<tr><td colspan="7"><div class="empty"><div>No tasks in ${esc(a.name)} yet.</div><button class="btn small" data-add-task data-area="${a.id}">+ Add one</button></div></td></tr>`);
-    return `<tr class="grouphdr"><td colspan="7"><button class="gh" data-collapse="${a.id}"><span class="tri">${collapsed ? "▶" : "▼"}</span> ${a.emoji || ""} ${esc(a.name).toUpperCase()} <span class="gcount">${rows.length}</span><span class="growbar"><span class="mini-track"><div style="width:${pct}%"></div></span> <span class="gcount">${pct}%</span></span></button></td></tr>${body}`;
+    return `<tr class="grouphdr"><td colspan="7"><button class="gh" data-collapse="${a.id}"><span class="tri">${collapsed ? "▶" : "▼"}</span><span style="width:10px;height:10px;border-radius:3px;background:${areaColor(a)};display:inline-block"></span> ${a.emoji || ""} ${esc(a.name).toUpperCase()} <span class="gcount">${rows.length}</span><span class="growbar"><span class="mini-track"><div style="width:${pct}%"></div></span> <span class="gcount">${pct}%</span></span></button></td></tr>${body}`;
   }).join("");
   if (!groups.trim()) return `<div class="grid-wrap"><div class="empty"><div class="big">Nothing matches this filter.</div><button class="btn" data-saved-clear>Show all tasks</button></div></div>`;
   return `<div class="grid-wrap"><table class="gt">
@@ -321,7 +331,7 @@ function calendarView() {
     const dayTasks = tasks.filter((t) => t.due_date === ds);
     cells += `<div class="day ${ds === todayStr ? "today" : ""} ${dnum === evDay ? "event" : ""}">
       <div class="dn">${dnum}${dnum === evDay ? " 🎃" : ""}</div>
-      ${dayTasks.map((t) => `<div class="ev ${t.status === "done" ? "done" : ""}" data-open="${t.id}" title="${esc(t.title)}">${esc(t.title)}</div>`).join("")}
+      ${dayTasks.map((t) => `<div class="ev ${t.status === "done" ? "done" : ""}" data-open="${t.id}" title="${esc(t.title)}" style="border-left:3px solid ${areaColorById(t.area_id)}">${esc(t.title)}</div>`).join("")}
     </div>`;
   }
   const nodate = tasksAll().filter((t) => matchesFilter(t) && !t.due_date && t.status !== "done");
@@ -329,6 +339,27 @@ function calendarView() {
     <div class="cal-head"><button class="btn small" data-cal="-1">←</button><h2>${monthName}</h2><button class="btn small" data-cal="1">→</button></div>
     <div class="cal">${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => `<div class="dow">${d}</div>`).join("")}${cells}</div>
     ${nodate.length ? `<div class="section-title">No due date (${nodate.length})</div><div class="grid-wrap" style="padding:6px">${nodate.map((t) => `<div class="ev" style="margin:4px" data-open="${t.id}">${esc(t.title)}</div>`).join("")}</div>` : ""}`;
+}
+
+/* ---------------- TIMELINE (by deadline, ungrouped) ---------------- */
+function timelineView() {
+  const tasks = tasksAll().filter((t) => matchesFilter(t) && (state.showDone || t.status !== "done"));
+  const withDate = tasks.filter((t) => t.due_date).sort((a, b) => (a.due_date < b.due_date ? -1 : 1));
+  const noDate = tasks.filter((t) => !t.due_date);
+  const b = { overdue: [], week: [], month: [], later: [] };
+  withDate.forEach((t) => { const c = countdown(t.due_date); if (!c) return; if (c.days < 0) b.overdue.push(t); else if (c.days <= 7) b.week.push(t); else if (c.days <= 31) b.month.push(t); else b.later.push(t); });
+  const sec = (label, list) => list.length ? `<div class="section-title">${label} · ${list.length}</div><div class="grid-wrap" style="padding:4px 12px;margin-bottom:6px">${list.map(timelineRow).join("")}</div>` : "";
+  const body = sec("⚠️ Overdue", b.overdue) + sec("🔥 This week", b.week) + sec("📅 This month", b.month) + sec("Later", b.later) + sec("No date yet", noDate);
+  return body || `<div class="empty panel" style="margin-top:14px">Nothing scheduled here.</div>`;
+}
+function timelineRow(t) {
+  const a = areaById(t.area_id);
+  return `<div class="fbrow" data-open="${t.id}" style="cursor:pointer;align-items:center">
+    <div style="width:8px;height:38px;border-radius:3px;background:${areaColor(a)};flex:none"></div>
+    <div class="fm"><div style="font-weight:600${t.status === "done" ? ";text-decoration:line-through;color:var(--faint)" : ""}">${esc(t.title)}${t.priority === "high" ? ` <span style="color:#dc2626;font-weight:800">▲</span>` : ""}</div>
+      <div class="meta">${a ? `<span style="color:${areaColor(a)};font-weight:600">${a.emoji || ""} ${esc(a.name)}</span> · ` : ""}${t.assignee_name ? `🧍 ${esc(t.assignee_name)}` : `<span style="color:var(--accent-strong)">unassigned</span>`} · 📅 ${fmtDate(t.due_date) || "—"}</div></div>
+    <span class="stsel st-${t.status}" style="pointer-events:none">${ST_GLYPH[t.status]} ${ST_LABEL[t.status]}</span>
+  </div>`;
 }
 
 /* ---------------- OVERVIEW ---------------- */
@@ -471,7 +502,7 @@ function peopleView() {
 function personCard(p) {
   const n = tasksAll().filter((t) => t.assignee_id == p.id).length;
   return `<div class="pcard">
-    <div style="display:flex;align-items:center;gap:8px"><h3>${esc(p.name)}</h3>${p.role && p.role !== "volunteer" ? `<span class="role">${esc(p.role)}</span>` : ""}<div class="grow"></div><button class="btn ghost small" data-edit-person="${p.id}">Edit</button></div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h3>${esc(p.name)}</h3>${p.role && p.role !== "volunteer" ? `<span class="role">${esc(p.role)}</span>` : ""}${p.is_approver ? `<span class="role" style="background:#f3efff;color:var(--accent-purple)">✓ Approver</span>` : ""}<div class="grow"></div><button class="btn ghost small" data-edit-person="${p.id}">Edit</button></div>
     <div class="chan">Prefers <b>${channelLabel(p.preferred_channel)}</b>${p.platform ? ` · ${esc(PLATFORMS[p.platform] || p.platform)}` : ""}</div>
     <div style="font-size:13px;color:var(--muted)">${p.email ? `📧 ${esc(p.email)}<br>` : ""}${p.phone ? `📱 ${esc(p.phone)}<br>` : ""}${p.channel_notes ? `📝 ${esc(p.channel_notes)}` : ""}</div>
     <div style="margin-top:10px"><span class="chip">${n} task${n === 1 ? "" : "s"}</span></div>
@@ -611,9 +642,10 @@ function openPersonModal(id) {
     <label class="field"><span>Name</span><input id="pName" value="${esc(p.name || "")}"/></label>
     <div class="field two"><label><span>Email</span><input id="pEmail" value="${esc(p.email || "")}"/></label><label><span>Phone</span><input id="pPhone" value="${esc(p.phone || "")}"/></label></div>
     <div class="field two"><label><span>Preferred channel</span><select id="pChan">${chanOpts}</select></label><label><span>Their world</span><select id="pPlat">${platOpts}</select></label></div>
-    <div class="field two"><label><span>Role</span><select id="pRole">${["volunteer", "lead", "co-host", "host"].map((r) => `<option value="${r}" ${p.role === r ? "selected" : ""}>${r}</option>`).join("")}</select></label><label><span>Contact notes</span><input id="pNotes" value="${esc(p.channel_notes || "")}"/></label></div>`,
+    <div class="field two"><label><span>Role</span><select id="pRole">${["volunteer", "lead", "co-host", "host", "PM"].map((r) => `<option value="${r}" ${p.role === r ? "selected" : ""}>${r}</option>`).join("")}</select></label><label><span>Contact notes</span><input id="pNotes" value="${esc(p.channel_notes || "")}"/></label></div>
+    <label class="field" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="pApprover" ${p.is_approver ? "checked" : ""} style="width:auto"/> <span style="margin:0">Idea approver — can moderate the ideas pipeline from their own link</span></label>`,
     async () => {
-      const payload = { name: $("#pName").value.trim(), email: $("#pEmail").value.trim() || null, phone: $("#pPhone").value.trim() || null, preferred_channel: $("#pChan").value, platform: $("#pPlat").value || null, role: $("#pRole").value, channel_notes: $("#pNotes").value.trim() || null };
+      const payload = { name: $("#pName").value.trim(), email: $("#pEmail").value.trim() || null, phone: $("#pPhone").value.trim() || null, preferred_channel: $("#pChan").value, platform: $("#pPlat").value || null, role: $("#pRole").value, channel_notes: $("#pNotes").value.trim() || null, is_approver: $("#pApprover").checked ? 1 : 0 };
       if (!payload.name) return toast("Add a name");
       if (id) await patch("/api/people/" + id, payload); else await post("/api/people", payload);
       await refresh(); render(); toast("Saved");
@@ -865,6 +897,7 @@ async function renderVolunteer(token) {
   let d; try { d = await get("/api/me/" + encodeURIComponent(token)); } catch (e) { appEl.innerHTML = `<div class="vol-wrap"><div class="facts" style="margin-top:40px"><h2>This link didn't work</h2><p class="countdown">Ask your coordinator for a fresh link.</p></div></div>`; return; }
   fab.dataset.person = d.person.id; fab.dataset.name = d.person.name;
   volCtx = { token, data: d, level: 0 };
+  window.__approverToken = d.person.is_approver ? token : null;
   const party = d.party || {};
   const when = [party.event_date ? fmtDate(party.event_date) : "", party.start_time].filter(Boolean).join(" · ");
   appEl.innerHTML = `<div class="vol-head"><h1>🎃 ${esc(party.name || "Halloween Party")}</h1><p>Hey ${esc(d.person.name)} — here's just your part${when ? " · " + esc(when) : ""}${party.location ? " · " + esc(party.location) : ""}</p></div>
@@ -873,16 +906,19 @@ async function renderVolunteer(token) {
 }
 async function mountVolIdeas() {
   const host = $("#volIdeas"); if (!host) return;
+  const isApprover = volCtx.data && volCtx.data.person && volCtx.data.person.is_approver;
   let list = []; try { list = await get("/api/ideas"); } catch { return; }
-  host.innerHTML = `<div class="section-title">💡 Party ideas</div>
+  host.innerHTML = `<div class="section-title">💡 Party ideas${isApprover ? " · you're an approver" : ""}</div>
     <div class="facts" style="margin-top:0">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap"><div class="countdown" style="flex:1;min-width:160px">Got a suggestion? Share it — the coordinator reviews every idea.</div><button class="btn primary small" id="volAddIdea">+ Share an idea</button></div>
-      ${list.length ? list.slice().sort((a, b) => (b.votes || 0) - (a.votes || 0)).slice(0, 12).map((i) => `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap"><div class="countdown" style="flex:1;min-width:160px">Got a suggestion? Share it${isApprover ? " — and as an approver, you can move ideas through the pipeline right here." : " — the coordinator reviews every idea."}</div><button class="btn primary small" id="volAddIdea">+ Share an idea</button></div>
+      ${list.length ? list.slice().sort((a, b) => (b.votes || 0) - (a.votes || 0)).slice(0, 20).map((i) => `
         <div class="fbrow" style="align-items:center"><button class="btn small ghost" data-volvote="${i.id}">👍 ${i.votes || 0}</button>
-          <div class="fm"><div style="font-weight:600">${esc(i.title)}</div><div class="meta">${esc(i.submitter_person_name || i.submitter_name || "Anon")} · ${IS_EMOJI[i.stage]} ${IS_LABEL[i.stage]}</div></div></div>`).join("") : `<div class="empty" style="font-size:13px">No ideas yet — be the first.</div>`}
+          <div class="fm"><div style="font-weight:600">${esc(i.title)}</div><div class="meta">${esc(i.submitter_person_name || i.submitter_name || "Anon")} · 💬 ${i.comments || 0}</div></div>
+          ${isApprover ? `<select class="stsel" data-volstage="${i.id}">${IDEA_STAGES.map((s) => `<option value="${s}" ${i.stage === s ? "selected" : ""}>${IS_EMOJI[s]} ${IS_LABEL[s]}</option>`).join("")}</select>` : `<span class="chip" style="color:${IS_COLOR[i.stage]}">${IS_EMOJI[i.stage]} ${IS_LABEL[i.stage]}</span>`}</div>`).join("") : `<div class="empty" style="font-size:13px">No ideas yet — be the first.</div>`}
     </div>`;
   const add = $("#volAddIdea"); if (add) add.onclick = () => openIdeaModal(volCtx.data.person.id, volCtx.data.person.name, () => mountVolIdeas());
   host.querySelectorAll("[data-volvote]").forEach((b) => (b.onclick = async () => { await doVote(b.dataset.volvote); mountVolIdeas(); }));
+  host.querySelectorAll("[data-volstage]").forEach((sel) => (sel.onchange = async (e) => { await patch(`/api/ideas/${sel.dataset.volstage}`, { stage: e.target.value }); toast("Idea updated"); }));
 }
 
 function volCalendarCard() {
