@@ -70,6 +70,7 @@ const state = {
   collapsed: {},             // areaId -> true
   navOpen: false,
   calMonth: null,            // {y, m}
+  showDone: false,           // hide completed tasks by default
 };
 
 /* ---------------- router ---------------- */
@@ -196,6 +197,7 @@ function topbar(party, cd) {
       ${dialMarkup(state.dial, ["Overview", "Working", "One task"], "dial")}
       <div class="grow"></div>
       ${state.dial === 1 ? `<span class="countdown">${esc(scope)}</span>
+      ${state.view !== "board" ? `<button class="btn small ghost" data-toggle-done>${state.showDone ? "☑ Showing done" : "☐ Show done"}</button>` : ""}
       <div class="viewswitch">
         ${["grid", "board", "calendar"].map((v) => `<button class="${state.view === v ? "on" : ""}" data-view="${v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join("")}
       </div>` : ""}
@@ -232,9 +234,12 @@ function gridView() {
     if (!rows.length && (state.filter.saved || state.filter.q)) return "";
     const done = rows.filter((r) => r.t.status === "done").length;
     const pct = rows.length ? Math.round((done / rows.length) * 100) : 0;
+    const shown = state.showDone ? rows : rows.filter((r) => r.t.status !== "done");
+    const hiddenDone = rows.length - shown.length;
     const collapsed = state.collapsed[a.id];
-    const body = collapsed ? "" : (rows.length
-      ? rows.map((r) => taskRow(r.t, ++n, r.depth)).join("")
+    const body = collapsed ? "" : (shown.length
+      ? shown.map((r) => taskRow(r.t, ++n, r.depth)).join("") + (hiddenDone ? `<tr><td colspan="7" style="padding:6px 12px;color:var(--faint);font-size:12px">${hiddenDone} completed ${hiddenDone === 1 ? "task" : "tasks"} hidden</td></tr>` : "")
+      : rows.length ? `<tr><td colspan="7"><div class="empty" style="padding:14px">🎉 All ${rows.length} done in ${esc(a.name)}.</div></td></tr>`
       : `<tr><td colspan="7"><div class="empty"><div>No tasks in ${esc(a.name)} yet.</div><button class="btn small" data-add-task data-area="${a.id}">+ Add one</button></div></td></tr>`);
     return `<tr class="grouphdr"><td colspan="7"><button class="gh" data-collapse="${a.id}"><span class="tri">${collapsed ? "▶" : "▼"}</span> ${a.emoji || ""} ${esc(a.name).toUpperCase()} <span class="gcount">${rows.length}</span><span class="growbar"><span class="mini-track"><div style="width:${pct}%"></div></span> <span class="gcount">${pct}%</span></span></button></td></tr>${body}`;
   }).join("");
@@ -297,7 +302,7 @@ function calendarView() {
   const { y, m } = state.calMonth;
   const first = new Date(y, m, 1); const startDow = first.getDay(); const dim = new Date(y, m + 1, 0).getDate();
   const monthName = first.toLocaleDateString(undefined, { month: "long", year: "numeric" });
-  const tasks = tasksAll().filter((t) => matchesFilter(t) && t.due_date);
+  const tasks = tasksAll().filter((t) => matchesFilter(t) && t.due_date && (state.showDone || t.status !== "done"));
   const todayStr = new Date().toISOString().slice(0, 10);
   const evDay = party.event_date && new Date(party.event_date + "T00:00:00").getMonth() === m && new Date(party.event_date + "T00:00:00").getFullYear() === y ? new Date(party.event_date + "T00:00:00").getDate() : null;
   let cells = "";
@@ -500,6 +505,7 @@ function wire() {
   // topbar
   const q = $("#q"); if (q) q.oninput = () => { state.filter.q = q.value; const c = $("#canvas"); if (c) c.innerHTML = canvas(); wireCanvas(); };
   appEl.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => { state.view = b.dataset.view; render(); }));
+  const td = $("[data-toggle-done]"); if (td) td.onclick = () => { state.showDone = !state.showDone; render(); };
   appEl.querySelectorAll("[data-add-task]").forEach((b) => (b.onclick = () => openTaskModal(null, b.dataset.area ? Number(b.dataset.area) : state.filter.areaId)));
   const dialEl = $("#dial"); if (dialEl) wireDial(dialEl, state.dial, 3, (l) => { state.dial = l; render(); });
 
@@ -560,6 +566,16 @@ function modal(inner, onSave) {
   back.querySelector("[data-close]").onclick = close;
   const sv = back.querySelector("[data-save]"); if (sv) sv.onclick = async () => { try { await onSave(); close(); } catch (e) { toast(e.message || "Error"); } };
   const f = back.querySelector("input,textarea,select"); if (f) f.focus();
+  // Draggable: grab any non-interactive part of the dialog to move it aside.
+  const dlg = back.querySelector(".modal");
+  let drag = false, sx = 0, sy = 0, ox = 0, oy = 0;
+  dlg.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("input,textarea,select,button,a,label")) return;
+    drag = true; sx = e.clientX; sy = e.clientY; dlg.style.cursor = "grabbing";
+    try { dlg.setPointerCapture(e.pointerId); } catch {}
+  });
+  dlg.addEventListener("pointermove", (e) => { if (drag) dlg.style.transform = `translate(${ox + e.clientX - sx}px, ${oy + e.clientY - sy}px)`; });
+  dlg.addEventListener("pointerup", (e) => { if (!drag) return; drag = false; ox += e.clientX - sx; oy += e.clientY - sy; dlg.style.cursor = ""; });
   return close;
 }
 function openTaskModal(id, presetArea) {
@@ -627,6 +643,7 @@ function showFeedbackModal(sent) {
         <button type="button" class="btn small" id="fbPick">🎯 Point to it</button>
         ${fbState.target ? `<button type="button" class="btn small ghost" id="fbClr">✕</button>` : ""}
       </div>
+      <div style="font-size:11px;color:var(--faint);margin-top:5px">Use 🎯 to click what's behind this window — or just drag this window aside.</div>
     </label>
     ${person ? "" : `<label class="field"><span>Your name (optional)</span><input id="fbName" value="${esc(fbState.authorName)}"/></label>`}`,
     async () => {
