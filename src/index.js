@@ -266,6 +266,74 @@ async function api(request, env, path) {
     }
   }
 
+  // ---------- Ideas pipeline (open capture, admin moderation) ----------
+  if (resource === "ideas") {
+    if (method === "GET" && !id) {
+      const rows = (await env.DB.prepare(
+        `SELECT i.*, a.name AS area_name, a.emoji AS area_emoji, p.name AS submitter_person_name,
+           (SELECT COUNT(*) FROM idea_votes v WHERE v.idea_id = i.id) AS votes,
+           (SELECT COUNT(*) FROM idea_comments c WHERE c.idea_id = i.id) AS comments
+         FROM ideas i LEFT JOIN areas a ON a.id = i.area_id LEFT JOIN people p ON p.id = i.submitter_person_id
+         ORDER BY i.created_at DESC`
+      ).all()).results;
+      return json(rows);
+    }
+    if (method === "GET" && id && seg[3] === "comments") {
+      const rows = (await env.DB.prepare(
+        `SELECT c.*, p.name AS person_name FROM idea_comments c LEFT JOIN people p ON p.id = c.author_person_id WHERE c.idea_id = ? ORDER BY c.created_at`
+      ).bind(id).all()).results;
+      return json(rows);
+    }
+    if (method === "POST" && !id) {
+      const b = await body(request);
+      if (!b.title || !b.title.trim()) return err("Give the idea a title.");
+      const r = await env.DB.prepare(
+        `INSERT INTO ideas (title, description, submitter_name, submitter_person_id, area_id, category) VALUES (?,?,?,?,?,?)`
+      ).bind(b.title.trim(), b.description || null, b.submitter_name || null, b.submitter_person_id || null, b.area_id || null, b.category || null).run();
+      return json({ id: r.meta.last_row_id }, 201);
+    }
+    if (method === "POST" && id && seg[3] === "vote") {
+      const { voter_key } = await body(request);
+      if (!voter_key) return err("Missing voter key.");
+      const existing = await env.DB.prepare("SELECT id FROM idea_votes WHERE idea_id = ? AND voter_key = ?").bind(id, voter_key).first();
+      if (existing) await env.DB.prepare("DELETE FROM idea_votes WHERE id = ?").bind(existing.id).run();
+      else await env.DB.prepare("INSERT OR IGNORE INTO idea_votes (idea_id, voter_key) VALUES (?,?)").bind(id, voter_key).run();
+      const c = await env.DB.prepare("SELECT COUNT(*) AS n FROM idea_votes WHERE idea_id = ?").bind(id).first();
+      return json({ voted: !existing, votes: c ? c.n : 0 });
+    }
+    if (method === "POST" && id && seg[3] === "comment") {
+      const b = await body(request);
+      if (!b.body || !b.body.trim()) return err("Say something.");
+      await env.DB.prepare("INSERT INTO idea_comments (idea_id, author_name, author_person_id, body) VALUES (?,?,?,?)").bind(id, b.author_name || null, b.author_person_id || null, b.body.trim()).run();
+      return json({ ok: true }, 201);
+    }
+    // admin-only from here
+    const gate = await requireAdmin(request, env);
+    if (gate) return gate;
+    if (method === "PATCH" && id) {
+      const b = await body(request);
+      await updateRow(env, "ideas", id, pick(b, ["title", "description", "area_id", "category", "stage", "impact", "effort", "decision_note"]));
+      return json({ ok: true });
+    }
+    if (method === "DELETE" && id) {
+      await env.DB.prepare("DELETE FROM idea_votes WHERE idea_id = ?").bind(id).run();
+      await env.DB.prepare("DELETE FROM idea_comments WHERE idea_id = ?").bind(id).run();
+      await env.DB.prepare("DELETE FROM ideas WHERE id = ?").bind(id).run();
+      return json({ ok: true });
+    }
+    if (method === "POST" && id && seg[3] === "promote") {
+      const idea = await env.DB.prepare("SELECT * FROM ideas WHERE id = ?").bind(id).first();
+      if (!idea) return err("No such idea.", 404);
+      const b = await body(request);
+      const r = await env.DB.prepare(
+        `INSERT INTO tasks (area_id, title, description, status, priority, due_date, assignee_id) VALUES (?,?,?,?,?,?,?)`
+      ).bind(b.area_id || idea.area_id || null, idea.title, idea.description || null, "todo", b.priority || "normal", b.due_date || null, b.assignee_id || null).run();
+      const taskId = r.meta.last_row_id;
+      await env.DB.prepare("UPDATE ideas SET stage = 'promoted', promoted_task_id = ? WHERE id = ?").bind(taskId, id).run();
+      return json({ ok: true, task_id: taskId });
+    }
+  }
+
   // ---------- Everything below is the admin surface ----------
   // Reads are open; writes need the PIN.
   const isWrite = method !== "GET";
@@ -276,7 +344,7 @@ async function api(request, env, path) {
 
   // Full dashboard snapshot
   if (resource === "state" && method === "GET") {
-    const [party, areas, people, tasks, supplies, fb] = await Promise.all([
+    const [party, areas, people, tasks, supplies, fb, ni] = await Promise.all([
       getParty(env),
       env.DB.prepare("SELECT * FROM areas ORDER BY sort_order, id").all(),
       env.DB.prepare("SELECT * FROM people ORDER BY name").all(),
@@ -297,6 +365,7 @@ async function api(request, env, path) {
         )
         .all(),
       env.DB.prepare("SELECT COUNT(*) AS n FROM feedback WHERE status = 'new'").first(),
+      env.DB.prepare("SELECT COUNT(*) AS n FROM ideas WHERE stage = 'submitted'").first(),
     ]);
     return json({
       party: partyClient(party),
@@ -306,6 +375,7 @@ async function api(request, env, path) {
       tasks: tasks.results,
       supplies: supplies.results,
       newFeedback: fb ? fb.n : 0,
+      newIdeas: ni ? ni.n : 0,
     });
   }
 

@@ -66,6 +66,39 @@ CREATE TABLE IF NOT EXISTS supplies (
   created_at     TEXT DEFAULT (datetime('now'))
 );
 
+-- Ideas pipeline (Planisware-informed): anyone submits, ideas move through a
+-- stage-gate, and an approved idea can be promoted into a real task.
+CREATE TABLE IF NOT EXISTS ideas (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  title               TEXT NOT NULL,
+  description         TEXT,
+  submitter_name      TEXT,
+  submitter_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+  area_id             INTEGER REFERENCES areas(id) ON DELETE SET NULL,
+  category            TEXT,
+  stage               TEXT DEFAULT 'submitted',  -- submitted | screening | approved | promoted | declined | parked
+  impact              INTEGER,                    -- 1..5, optional score
+  effort              INTEGER,                    -- 1..5, optional score
+  decision_note       TEXT,                       -- why approved/declined
+  promoted_task_id    INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+  created_at          TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS idea_votes (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  idea_id    INTEGER REFERENCES ideas(id) ON DELETE CASCADE,
+  voter_key  TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(idea_id, voter_key)
+);
+CREATE TABLE IF NOT EXISTS idea_comments (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  idea_id          INTEGER REFERENCES ideas(id) ON DELETE CASCADE,
+  author_name      TEXT,
+  author_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+  body             TEXT NOT NULL,
+  created_at       TEXT DEFAULT (datetime('now'))
+);
+
 -- The always-available "how's this working for you?" widget writes here.
 CREATE TABLE IF NOT EXISTS feedback (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,

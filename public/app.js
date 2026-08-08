@@ -57,6 +57,13 @@ function googleCalUrl(party) {
   if (party.location) p.set("location", party.location);
   return "https://calendar.google.com/calendar/render?" + p.toString();
 }
+// ---- ideas ----
+const IDEA_STAGES = ["submitted", "screening", "approved", "promoted", "declined", "parked"];
+const IS_LABEL = { submitted: "Submitted", screening: "Screening", approved: "Approved", promoted: "Promoted", declined: "Declined", parked: "Parked" };
+const IS_EMOJI = { submitted: "💡", screening: "🔍", approved: "✅", promoted: "🎯", declined: "🚫", parked: "🅿️" };
+const IS_COLOR = { submitted: "#b45309", screening: "#1d4ed8", approved: "#15803d", promoted: "#7c3aed", declined: "#b42318", parked: "#5c6470" };
+function voterKey() { let k = localStorage.getItem("ptp_voter"); if (!k) { k = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)); localStorage.setItem("ptp_voter", k); } return k; }
+let ideasData = [];
 
 /* ---------------- state ---------------- */
 const state = {
@@ -172,6 +179,7 @@ function sidebar() {
     <div class="nav-spacer"></div>
     <div class="nav-group">
       <button class="nav-item ${state.screen === "people" ? "active" : ""}" data-screen="people"><span class="emoji">👥</span> People <span class="count">${d.people.length}</span></button>
+      <button class="nav-item ${state.screen === "ideas" ? "active" : ""}" data-screen="ideas"><span class="emoji">💡</span> Ideas${d.newIdeas ? ` <span class="count">${d.newIdeas}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "feedback" ? "active" : ""}" data-screen="feedback"><span class="emoji">💬</span> Feedback${d.newFeedback ? ` <span class="count">${d.newFeedback}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "settings" ? "active" : ""}" data-screen="settings"><span class="emoji">⚙️</span> Settings</button>
     </div>
@@ -207,6 +215,7 @@ function topbar(party, cd) {
 
 function canvas() {
   if (state.screen === "people") return peopleView();
+  if (state.screen === "ideas") return `<div id="ideasmount"><div class="empty">Loading ideas…</div></div>`;
   if (state.screen === "feedback") return `<div id="fbmount"><div class="empty">Loading…</div></div>`;
   if (state.screen === "settings") return settingsView();
   if (state.dial === 0) return overview();
@@ -498,7 +507,7 @@ function wire() {
   appEl.querySelectorAll("[data-area]").forEach((b) => (b.onclick = () => { state.screen = "work"; state.dial = 1; state.filter = { areaId: Number(b.dataset.area), saved: null, q: state.filter.q }; state.navOpen = false; render(); }));
   appEl.querySelectorAll("[data-saved]").forEach((b) => (b.onclick = () => { state.screen = "work"; state.dial = 1; state.filter = { areaId: null, saved: b.dataset.saved || null, q: state.filter.q }; state.navOpen = false; render(); }));
   const ov = $("[data-overview]"); if (ov) ov.onclick = () => { state.screen = "work"; state.dial = 0; state.filter = { areaId: null, saved: null, q: "" }; state.navOpen = false; render(); };
-  appEl.querySelectorAll("[data-screen]").forEach((b) => (b.onclick = () => { state.screen = b.dataset.screen; state.navOpen = false; render(); if (state.screen === "feedback") mountFeedback(); }));
+  appEl.querySelectorAll("[data-screen]").forEach((b) => (b.onclick = () => { state.screen = b.dataset.screen; state.navOpen = false; render(); if (state.screen === "feedback") mountFeedback(); if (state.screen === "ideas") mountIdeas(); }));
   const sc = $("[data-saved-clear]"); if (sc) sc.onclick = () => { state.filter = { areaId: null, saved: null, q: "" }; render(); };
   const nt = $("[data-navtoggle]"); if (nt) nt.onclick = () => { state.navOpen = !state.navOpen; render(); };
 
@@ -526,7 +535,7 @@ function wireCanvas() {
   // board/calendar
   appEl.querySelectorAll("[data-cal]").forEach((b) => (b.onclick = () => { let { y, m } = state.calMonth; m += Number(b.dataset.cal); if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; } state.calMonth = { y, m }; render(); }));
   // overview jumps handled by data-saved/data-screen above (re-query)
-  appEl.querySelectorAll("[data-screen]").forEach((b) => (b.onclick = () => { state.screen = b.dataset.screen; render(); if (state.screen === "feedback") mountFeedback(); }));
+  appEl.querySelectorAll("[data-screen]").forEach((b) => (b.onclick = () => { state.screen = b.dataset.screen; render(); if (state.screen === "feedback") mountFeedback(); if (state.screen === "ideas") mountIdeas(); }));
   appEl.querySelectorAll("[data-saved]").forEach((b) => (b.onclick = () => { state.screen = "work"; state.dial = 1; state.filter = { areaId: null, saved: b.dataset.saved || null, q: "" }; render(); }));
   const cc = $("[data-copy-cal]"); if (cc) cc.onclick = () => { const url = location.origin + "/api/calendar/party.ics"; navigator.clipboard.writeText(url).then(() => toast("Calendar link copied")).catch(() => prompt("Copy:", url)); };
   // spotlight
@@ -620,6 +629,128 @@ async function mountFeedback() {
     <div class="grid-wrap" style="padding:14px">${items.length ? items.map((f) => `<div class="fbrow"><div class="fm"><div>${icon[f.sentiment] || "💬"} ${esc(f.message)}</div>${f.target ? `<div class="meta" style="color:var(--accent-strong)">🎯 ${esc(f.target)}</div>` : ""}<div class="meta">${esc(f.person_name || f.author_name || "Anonymous")} · ${esc((f.created_at || "").replace("T", " ").slice(0, 16))} ${f.page ? `· ${esc(f.page)}` : ""}</div></div>
       <select class="cell-sel" style="width:auto" data-fb="${f.id}">${["new", "reviewed", "done"].map((s) => `<option ${s === f.status ? "selected" : ""}>${s}</option>`).join("")}</select></div>`).join("") : `<div class="empty">No feedback yet — it shows up the moment someone taps 💬.</div>`}</div>`;
   mount.querySelectorAll("[data-fb]").forEach((s) => (s.onchange = async (e) => { await patch("/api/feedback/" + s.dataset.fb, { status: e.target.value }); toast("Updated"); }));
+}
+
+/* ---------------- ideas pipeline ---------------- */
+async function mountIdeas() {
+  const mount = $("#ideasmount"); if (!mount) return;
+  try { ideasData = await get("/api/ideas"); } catch (e) { mount.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  drawIdeas();
+}
+function drawIdeas() {
+  const mount = $("#ideasmount"); if (!mount) return;
+  const view = state.ideasView || "board";
+  mount.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+      <div><h1 style="margin:0;font-size:18px">💡 Ideas</h1><div class="countdown">Anyone can suggest something. Ideas move Submitted → Screening → Approved, and an approved idea can be <b>promoted into a real task</b>.</div></div>
+      <div class="grow"></div>
+      <div class="viewswitch">${["board", "list"].map((v) => `<button class="${view === v ? "on" : ""}" data-iview="${v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join("")}</div>
+      <button class="btn primary" data-add-idea>+ Share an idea</button>
+    </div>
+    ${ideasData.length ? (view === "board" ? ideasBoard() : ideasList()) : `<div class="empty panel" style="padding:30px">No ideas yet — share the first one.</div>`}`;
+  wireIdeas(mount);
+}
+function ideasBoard() {
+  const cols = ["submitted", "screening", "approved", "promoted"];
+  ["declined", "parked"].forEach((s) => { if (ideasData.some((i) => i.stage === s)) cols.push(s); });
+  return `<div class="board">${cols.map((s) => {
+    const list = ideasData.filter((i) => i.stage === s);
+    return `<div class="board-col"><h3>${IS_EMOJI[s]} ${IS_LABEL[s]} <span>${list.length}</span></h3>${list.map(ideaCard).join("") || `<div class="empty" style="padding:8px;font-size:12px">—</div>`}</div>`;
+  }).join("")}</div>`;
+}
+function ideasList() {
+  const sorted = ideasData.slice().sort((a, b) => (b.votes || 0) - (a.votes || 0));
+  return `<div class="grid-wrap" style="padding:6px 14px">${sorted.map((i) => `
+    <div class="fbrow" data-idea="${i.id}" style="cursor:pointer;align-items:center">
+      <button class="btn small ghost" data-vote="${i.id}">👍 ${i.votes || 0}</button>
+      <div class="fm"><div style="font-weight:600">${esc(i.title)} <span class="chip" style="color:${IS_COLOR[i.stage]}">${IS_EMOJI[i.stage]} ${IS_LABEL[i.stage]}</span></div>
+        <div class="meta">${i.area_emoji ? `${i.area_emoji} ${esc(i.area_name || "")} · ` : ""}${esc(i.submitter_person_name || i.submitter_name || "Anonymous")} · 💬 ${i.comments || 0}</div></div>
+    </div>`).join("")}</div>`;
+}
+function ideaCard(i) {
+  return `<div class="bcard" data-idea="${i.id}">
+    <div class="bt">${esc(i.title)}</div>
+    <div class="brow">${i.area_emoji ? `<span>${i.area_emoji} ${esc(i.area_name || "")}</span>` : ""}<span>${esc(i.submitter_person_name || i.submitter_name || "Anon")}</span></div>
+    <div class="brow" style="margin-top:6px">
+      <button class="btn small ghost" data-vote="${i.id}">👍 ${i.votes || 0}</button>
+      <span class="chip">💬 ${i.comments || 0}</span>
+      ${i.impact || i.effort ? `<span class="chip" title="impact / effort">I${i.impact || "–"}·E${i.effort || "–"}</span>` : ""}
+      ${i.stage === "promoted" && i.promoted_task_id ? `<span class="chip" style="color:var(--accent-purple)">→ task</span>` : ""}
+    </div>
+  </div>`;
+}
+async function doVote(id) {
+  const r = await post(`/api/ideas/${id}/vote`, { voter_key: voterKey() });
+  const i = ideasData.find((x) => x.id == id); if (i) i.votes = r.votes;
+  return r;
+}
+function wireIdeas(mount) {
+  mount.querySelectorAll("[data-iview]").forEach((b) => (b.onclick = () => { state.ideasView = b.dataset.iview; drawIdeas(); }));
+  const add = mount.querySelector("[data-add-idea]"); if (add) add.onclick = () => openIdeaModal();
+  mount.querySelectorAll("[data-vote]").forEach((b) => (b.onclick = async (e) => { e.stopPropagation(); await doVote(b.dataset.vote); drawIdeas(); }));
+  mount.querySelectorAll("[data-idea]").forEach((c) => (c.onclick = () => openIdeaDetail(Number(c.dataset.idea))));
+}
+function openIdeaModal(personId, personName, onDone) {
+  const areaOpts = `<option value="">— area (optional) —</option>` + (state.data ? state.data.areas : (volCtx.data && volCtx.data.areas) || []).map((a) => `<option value="${a.id}">${a.emoji || ""} ${esc(a.name)}</option>`).join("");
+  const hasAreas = state.data && state.data.areas;
+  modal(`<h3>Share an idea</h3><p class="hint">A suggestion for the party — decor, food, a bit of theatre, anything. It enters the pipeline for review.</p>
+    <label class="field"><span>Idea</span><input id="iTitle" placeholder="One line — what's the idea?"/></label>
+    <label class="field"><span>Details (optional)</span><textarea id="iDesc" rows="3" placeholder="Anything that helps explain it"></textarea></label>
+    <div class="field ${hasAreas ? "two" : ""}">${hasAreas ? `<label><span>Area (optional)</span><select id="iArea">${areaOpts}</select></label>` : ""}${personId ? "" : `<label><span>Your name (optional)</span><input id="iName" value="${esc(personName || "")}"/></label>`}</div>`,
+    async () => {
+      const title = $("#iTitle").value.trim(); if (!title) throw new Error("Give it a one-line title");
+      await post("/api/ideas", { title, description: $("#iDesc").value.trim() || null, area_id: ($("#iArea") ? $("#iArea").value : "") || null, submitter_person_id: personId || null, submitter_name: personId ? null : ($("#iName") ? $("#iName").value.trim() : null) });
+      toast("Idea shared 🎉"); if (onDone) onDone(); else await mountIdeas();
+    });
+}
+async function openIdeaDetail(id) {
+  const i = ideasData.find((x) => x.id == id); if (!i) return;
+  let comments = []; try { comments = await get(`/api/ideas/${id}/comments`); } catch {}
+  const admin = !!getPin();
+  const areaOpts = `<option value="">—</option>` + state.data.areas.map((a) => `<option value="${a.id}" ${i.area_id == a.id ? "selected" : ""}>${a.emoji || ""} ${esc(a.name)}</option>`).join("");
+  modal(`
+    <h3 style="margin-bottom:4px">${esc(i.title)}</h3>
+    ${i.description ? `<p class="hint">${esc(i.description)}</p>` : ""}
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+      <button class="btn small" id="dVote">👍 ${i.votes || 0}</button>
+      <span class="chip" style="color:${IS_COLOR[i.stage]}">${IS_EMOJI[i.stage]} ${IS_LABEL[i.stage]}</span>
+      ${i.area_emoji ? `<span class="chip">${i.area_emoji} ${esc(i.area_name || "")}</span>` : ""}
+      <span style="color:var(--muted);font-size:12px">by ${esc(i.submitter_person_name || i.submitter_name || "Anonymous")}</span>
+    </div>
+    ${admin ? `<div class="fact-box" style="background:var(--surface-2);border-color:var(--line)">
+      <div class="field two"><label><span>Stage</span><select id="dStage">${IDEA_STAGES.map((s) => `<option value="${s}" ${i.stage === s ? "selected" : ""}>${IS_EMOJI[s]} ${IS_LABEL[s]}</option>`).join("")}</select></label><label><span>Area</span><select id="dArea">${areaOpts}</select></label></div>
+      <div class="field two"><label><span>Impact (1-5)</span><input id="dImpact" type="number" min="1" max="5" value="${i.impact || ""}"/></label><label><span>Effort (1-5)</span><input id="dEffort" type="number" min="1" max="5" value="${i.effort || ""}"/></label></div>
+      <label class="field"><span>Decision note</span><input id="dNote" value="${esc(i.decision_note || "")}" placeholder="Why approved / declined"/></label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn small" id="dSave">Save</button>
+        ${i.stage === "promoted" ? `<span class="chip" style="color:var(--accent-purple)">Promoted → task #${i.promoted_task_id || ""}</span>` : `<button class="btn small primary" id="dPromote">🎯 Promote to task</button>`}
+        <button class="btn small ghost danger" id="dDel">Delete</button>
+      </div>
+    </div>` : ""}
+    <div class="section-title" style="margin-top:14px">Comments (${comments.length})</div>
+    <div>${comments.map((c) => `<div class="fbrow"><div class="fm"><div>${esc(c.body)}</div><div class="meta">${esc(c.person_name || c.author_name || "Anonymous")} · ${esc((c.created_at || "").replace("T", " ").slice(0, 16))}</div></div></div>`).join("") || `<div class="empty" style="padding:8px;font-size:13px">No comments yet.</div>`}</div>
+    <div style="display:flex;gap:6px;margin-top:8px"><input id="dComment" placeholder="Add a comment…" style="flex:1;border:1px solid var(--line-strong);border-radius:8px;padding:8px"/><button class="btn small" id="dCommentBtn">Post</button></div>`,
+    null);
+  const box = document.body.lastElementChild;
+  const q = (s) => box.querySelector(s);
+  q("#dVote").onclick = async () => { const r = await doVote(id); q("#dVote").textContent = `👍 ${r.votes}`; };
+  q("#dCommentBtn").onclick = async () => { const v = q("#dComment").value.trim(); if (!v) return; await post(`/api/ideas/${id}/comment`, { body: v, author_name: fab.dataset.name || null, author_person_id: fab.dataset.person || null }); box.remove(); await mountIdeas(); openIdeaDetail(id); };
+  if (admin) {
+    q("#dSave").onclick = async () => { await patch(`/api/ideas/${id}`, { stage: q("#dStage").value, area_id: q("#dArea").value || null, impact: q("#dImpact").value ? Number(q("#dImpact").value) : null, effort: q("#dEffort").value ? Number(q("#dEffort").value) : null, decision_note: q("#dNote").value.trim() || null }); box.remove(); await mountIdeas(); toast("Saved"); };
+    const pr = q("#dPromote"); if (pr) pr.onclick = () => { box.remove(); openPromoteModal(i); };
+    q("#dDel").onclick = async () => { if (!confirm("Delete this idea?")) return; await del(`/api/ideas/${id}`); box.remove(); await mountIdeas(); };
+  }
+}
+function openPromoteModal(idea) {
+  const areaOpts = state.data.areas.map((a) => `<option value="${a.id}" ${idea.area_id == a.id ? "selected" : ""}>${a.emoji || ""} ${esc(a.name)}</option>`).join("");
+  const ownerOpts = `<option value="">Unassigned</option>` + state.data.people.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
+  modal(`<h3>🎯 Promote to task</h3><p class="hint">Creates a real task from "<b>${esc(idea.title)}</b>" and marks the idea Promoted.</p>
+    <div class="field two"><label><span>Area / phase</span><select id="prArea">${areaOpts}</select></label><label><span>Owner</span><select id="prOwner">${ownerOpts}</select></label></div>
+    <div class="field two"><label><span>Priority</span><select id="prPrio"><option value="normal">Med</option><option value="high">High</option><option value="low">Low</option></select></label><label><span>Due</span><input id="prDue" type="date"/></label></div>`,
+    async () => {
+      await post(`/api/ideas/${idea.id}/promote`, { area_id: $("#prArea").value || null, assignee_id: $("#prOwner").value || null, priority: $("#prPrio").value, due_date: $("#prDue").value || null });
+      await refresh(); await mountIdeas(); toast("Promoted → task created 🎯");
+    });
 }
 
 /* ---------------- feedback widget (with element picker) ---------------- */
@@ -737,8 +868,21 @@ async function renderVolunteer(token) {
   const party = d.party || {};
   const when = [party.event_date ? fmtDate(party.event_date) : "", party.start_time].filter(Boolean).join(" · ");
   appEl.innerHTML = `<div class="vol-head"><h1>🎃 ${esc(party.name || "Halloween Party")}</h1><p>Hey ${esc(d.person.name)} — here's just your part${when ? " · " + esc(when) : ""}${party.location ? " · " + esc(party.location) : ""}</p></div>
-    <div class="vol-dial" id="volDialMount"></div><div class="vol-wrap">${volCalendarCard()}<div id="volBody"></div></div>`;
-  mountVolDial(); drawVol(); wireVolCalendar();
+    <div class="vol-dial" id="volDialMount"></div><div class="vol-wrap">${volCalendarCard()}<div id="volBody"></div><div id="volIdeas"></div></div>`;
+  mountVolDial(); drawVol(); wireVolCalendar(); mountVolIdeas();
+}
+async function mountVolIdeas() {
+  const host = $("#volIdeas"); if (!host) return;
+  let list = []; try { list = await get("/api/ideas"); } catch { return; }
+  host.innerHTML = `<div class="section-title">💡 Party ideas</div>
+    <div class="facts" style="margin-top:0">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap"><div class="countdown" style="flex:1;min-width:160px">Got a suggestion? Share it — the coordinator reviews every idea.</div><button class="btn primary small" id="volAddIdea">+ Share an idea</button></div>
+      ${list.length ? list.slice().sort((a, b) => (b.votes || 0) - (a.votes || 0)).slice(0, 12).map((i) => `
+        <div class="fbrow" style="align-items:center"><button class="btn small ghost" data-volvote="${i.id}">👍 ${i.votes || 0}</button>
+          <div class="fm"><div style="font-weight:600">${esc(i.title)}</div><div class="meta">${esc(i.submitter_person_name || i.submitter_name || "Anon")} · ${IS_EMOJI[i.stage]} ${IS_LABEL[i.stage]}</div></div></div>`).join("") : `<div class="empty" style="font-size:13px">No ideas yet — be the first.</div>`}
+    </div>`;
+  const add = $("#volAddIdea"); if (add) add.onclick = () => openIdeaModal(volCtx.data.person.id, volCtx.data.person.name, () => mountVolIdeas());
+  host.querySelectorAll("[data-volvote]").forEach((b) => (b.onclick = async () => { await doVote(b.dataset.volvote); mountVolIdeas(); }));
 }
 
 function volCalendarCard() {
