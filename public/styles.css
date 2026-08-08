@@ -150,7 +150,7 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .st-done { background: #dcfce7; color: #15803d; }
 
 .priosel { border: none; background: none; text-align: center; cursor: pointer; font-weight: 700; -webkit-appearance: none; appearance: none; }
-.prio-high { color: #c2410c; } .prio-normal { color: #b45309; } .prio-low { color: #868d99; }
+.prio-high { color: #dc2626; font-weight: 800; } .prio-normal { color: #d97706; } .prio-low { color: #9ca3af; }
 
 .pctcell { display: flex; align-items: center; gap: 6px; }
 .pct-track { flex: 1; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }

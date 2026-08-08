@@ -613,11 +613,14 @@ function openFeedback(prefill) {
   showFeedbackModal();
 }
 function saveFbInputs() { const m = $("#fbMsg"); if (m) fbState.message = m.value; const n = $("#fbName"); if (n) fbState.authorName = n.value; }
-function showFeedbackModal() {
+function showFeedbackModal(sent) {
   const person = fab.dataset.person;
   const sents = [["love", "❤️ Love"], ["idea", "💡 Idea"], ["confusing", "😕 Confusing"], ["bug", "🐞 Bug"]];
-  fbCloseModal = modal(`<h3>How's this working?</h3><p class="hint">Confusing, broken, an idea, or just love — goes straight to the coordinator.</p>
-    <div class="sentiments">${sents.map(([v, l]) => `<button class="btn ${fbState.sentiment === v ? "sel" : ""}" data-sent="${v}">${l}</button>`).join("")}</div>
+  fbCloseModal = modal(`
+    ${sent ? `<div style="background:#dcfce7;color:#15803d;font-weight:600;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:13px">✓ Sent — thank you! Add another below, or tap Done.</div>` : ""}
+    <h3>How's this working?</h3><p class="hint">Confusing, broken, an idea, or just love — goes straight to the coordinator. Send as many as you like.</p>
+    <label class="field"><span>Your feedback</span><textarea id="fbMsg" rows="3" placeholder="Tell me what you're seeing…">${esc(fbState.message)}</textarea></label>
+    <div class="sentiments">${sents.map(([v, l]) => `<button type="button" class="btn ${fbState.sentiment === v ? "sel" : ""}" data-sent="${v}">${l}</button>`).join("")}</div>
     <label class="field"><span>What's this about?</span>
       <div style="display:flex;gap:8px;align-items:center">
         <div id="fbTgt" style="flex:1;font-size:13px;color:${fbState.target ? "var(--ink)" : "var(--muted)"};background:var(--surface-2);border-radius:8px;padding:8px 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fbState.target ? "🎯 " + esc(fbState.target) : "The whole page"}</div>
@@ -625,17 +628,23 @@ function showFeedbackModal() {
         ${fbState.target ? `<button type="button" class="btn small ghost" id="fbClr">✕</button>` : ""}
       </div>
     </label>
-    ${person ? "" : `<label class="field"><span>Your name (optional)</span><input id="fbName" value="${esc(fbState.authorName)}"/></label>`}
-    <label class="field"><span>Your feedback</span><textarea id="fbMsg" rows="3" placeholder="Tell me what you're seeing…">${esc(fbState.message)}</textarea></label>`,
+    ${person ? "" : `<label class="field"><span>Your name (optional)</span><input id="fbName" value="${esc(fbState.authorName)}"/></label>`}`,
     async () => {
       saveFbInputs();
-      if (!fbState.message.trim()) throw new Error("Type something first 🙂");
+      if (!fbState.message.trim()) throw new Error("Type your feedback in the box first 🙂");
       await post("/api/feedback", { message: fbState.message.trim(), sentiment: fbState.sentiment, page: location.pathname, target: fbState.target, person_id: person || null, author_name: person ? null : (fbState.authorName || null) });
-      toast("Thank you! 🙏"); if (state.screen === "feedback") mountFeedback();
+      if (state.screen === "feedback") mountFeedback();
+      const keepName = fbState.authorName;
+      fbState = { sentiment: null, message: "", target: null, authorName: keepName };
+      fbCloseModal();
+      showFeedbackModal(true); // reopen cleared so they can add another
     });
+  const sv = document.querySelector(".modal-actions [data-save]"); if (sv) sv.textContent = "Send";
+  const cx = document.querySelector(".modal-actions [data-close]"); if (cx) cx.textContent = "Done";
   document.querySelectorAll(".sentiments [data-sent]").forEach((b) => (b.onclick = () => { fbState.sentiment = b.dataset.sent; document.querySelectorAll(".sentiments [data-sent]").forEach((x) => x.classList.remove("sel")); b.classList.add("sel"); }));
   const pick = $("#fbPick"); if (pick) pick.onclick = () => { saveFbInputs(); fbCloseModal(); startElementPick(); };
   const clr = $("#fbClr"); if (clr) clr.onclick = () => { saveFbInputs(); fbState.target = null; fbCloseModal(); showFeedbackModal(); };
+  const msg = $("#fbMsg"); if (msg) { msg.focus(); msg.setSelectionRange(msg.value.length, msg.value.length); }
 }
 function describeEl(el) {
   const txt = (el.innerText || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 50);
