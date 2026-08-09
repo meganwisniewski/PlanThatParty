@@ -443,7 +443,7 @@ async function api(request, env, path) {
     // Host-only: the full plan (tasks, people, everything) requires the admin PIN.
     const gate = await requireAdmin(request, env);
     if (gate) return gate;
-    const [party, areas, people, tasks, supplies, fb, ni] = await Promise.all([
+    const [party, areas, people, tasks, supplies, fb, ni, gu] = await Promise.all([
       getParty(env),
       env.DB.prepare("SELECT * FROM areas ORDER BY sort_order, id").all(),
       env.DB.prepare("SELECT * FROM people ORDER BY name").all(),
@@ -465,6 +465,7 @@ async function api(request, env, path) {
         .all(),
       env.DB.prepare("SELECT COUNT(*) AS n FROM feedback WHERE status = 'new'").first(),
       env.DB.prepare("SELECT COUNT(*) AS n FROM ideas WHERE stage = 'submitted'").first(),
+      env.DB.prepare("SELECT * FROM guests ORDER BY created_at DESC").all(),
     ]);
     return json({
       party: partyClient(party),
@@ -473,6 +474,7 @@ async function api(request, env, path) {
       people: people.results,
       tasks: tasks.results,
       supplies: supplies.results,
+      guests: gu.results,
       newFeedback: fb ? fb.n : 0,
       newIdeas: ni ? ni.n : 0,
     });
@@ -483,6 +485,34 @@ async function api(request, env, path) {
     const b = await body(request);
     await updateRow(env, "party", 1, pick(b, ["name", "event_date", "start_time", "location", "theme", "headcount_target", "budget_target", "notes", "cal_details", "public_fields", "admin_pin"]));
     return json({ ok: true });
+  }
+
+  // ---------- guests (private, host-only) ----------
+  if (resource === "guests") {
+    if (method === "GET") {
+      const gate = await requireAdmin(request, env);
+      if (gate) return gate;
+      const rows = (await env.DB.prepare("SELECT * FROM guests ORDER BY created_at DESC").all()).results;
+      return json(rows);
+    }
+    if (method === "POST") {
+      const b = await body(request);
+      if (!b.name || !b.name.trim()) return err("Name required.");
+      const r = await env.DB.prepare(
+        "INSERT INTO guests (name, status, plus_count, contact, notes) VALUES (?,?,?,?,?)"
+      ).bind(b.name.trim(), b.status || "invited", b.plus_count ? Number(b.plus_count) : 0, b.contact || null, b.notes || null).run();
+      return json({ id: r.meta.last_row_id }, 201);
+    }
+    if (method === "PATCH" && id) {
+      const b = await body(request);
+      if ("plus_count" in b) b.plus_count = b.plus_count ? Number(b.plus_count) : 0;
+      await updateRow(env, "guests", id, pick(b, ["name", "status", "plus_count", "contact", "notes"]));
+      return json({ ok: true });
+    }
+    if (method === "DELETE" && id) {
+      await env.DB.prepare("DELETE FROM guests WHERE id = ?").bind(id).run();
+      return json({ ok: true });
+    }
   }
 
   // ---------- areas ----------

@@ -242,6 +242,7 @@ function sidebar() {
     <div class="nav-spacer"></div>
     <div class="nav-group">
       <button class="nav-item ${state.screen === "people" ? "active" : ""}" data-screen="people"><span class="emoji">👥</span> People <span class="count">${d.people.length}</span></button>
+      <button class="nav-item ${state.screen === "guests" ? "active" : ""}" data-screen="guests"><span class="emoji">🎟️</span> Guests${(d.guests && d.guests.length) ? ` <span class="count">${d.guests.length}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "ideas" ? "active" : ""}" data-screen="ideas"><span class="emoji">💡</span> Ideas${d.newIdeas ? ` <span class="count">${d.newIdeas}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "feedback" ? "active" : ""}" data-screen="feedback"><span class="emoji">💬</span> Feedback${d.newFeedback ? ` <span class="count">${d.newFeedback}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "settings" ? "active" : ""}" data-screen="settings"><span class="emoji">⚙️</span> Settings</button>
@@ -279,6 +280,7 @@ function topbar(party, cd) {
 
 function canvas() {
   if (state.screen === "people") return peopleView();
+  if (state.screen === "guests") return guestsView();
   if (state.screen === "ideas") return `<div id="ideasmount"><div class="empty">Loading ideas…</div></div>`;
   if (state.screen === "feedback") return `<div id="fbmount"><div class="empty">Loading…</div></div>`;
   if (state.screen === "settings") return settingsView();
@@ -549,6 +551,46 @@ function panel() {
 }
 
 /* ---------------- PEOPLE ---------------- */
+/* ---------------- GUESTS (private, host-only) ---------------- */
+const GUEST_STATUS = [["coming", "✅ Coming"], ["maybe", "🤔 Maybe"], ["invited", "✉️ Invited"], ["cant", "❌ Can't"]];
+const GS_COLOR = { coming: "#15803d", maybe: "#b45309", invited: "#5c6470", cant: "#b42318" };
+const guestHeads = (g) => 1 + (Number(g.plus_count) || 0);
+function guestsView() {
+  const gs = state.data.guests || [];
+  const heads = (st) => gs.filter((g) => g.status === st).reduce((n, g) => n + guestHeads(g), 0);
+  const inp = "border:1px solid var(--line-strong);border-radius:7px;padding:7px 9px;font:inherit;background:var(--surface)";
+  return `<div style="max-width:860px">
+    <div class="facts"><h2>🎟️ Guest list <span style="color:var(--faint);font-weight:400;font-size:13px">— private, just for planning</span></h2>
+      <div class="countdown" style="margin-bottom:14px">The party's open — people just show up — so this is only a place to jot who you're expecting. Nobody but hosts sees this.</div>
+      <div style="display:flex;gap:22px;flex-wrap:wrap">
+        <div><div style="font-size:26px;font-weight:800;color:${GS_COLOR.coming}">${heads("coming")}</div><div class="meta">coming (heads)</div></div>
+        <div><div style="font-size:26px;font-weight:800;color:${GS_COLOR.maybe}">${heads("maybe")}</div><div class="meta">maybe</div></div>
+        <div><div style="font-size:26px;font-weight:800;color:var(--muted)">${heads("invited")}</div><div class="meta">invited</div></div>
+        <div><div style="font-size:26px;font-weight:800">${gs.length}</div><div class="meta">on the list</div></div>
+      </div>
+    </div>
+    <div class="facts" style="margin-top:14px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input id="gName" placeholder="Add a name…" style="flex:1;min-width:180px;${inp}"/>
+        <input id="gPlus" type="number" min="0" placeholder="+guests" title="extra heads beyond this person" style="width:96px;${inp}"/>
+        <button class="btn primary" data-add-guest>Add</button>
+      </div>
+    </div>
+    <div class="facts" style="margin-top:14px">
+      ${gs.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:14px">
+        <thead><tr style="text-align:left;color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.05em">
+          <th style="padding:6px 8px">Name</th><th style="padding:6px 8px">Status</th><th style="padding:6px 8px">+Guests</th><th style="padding:6px 8px">Notes</th><th></th></tr></thead>
+        <tbody>${gs.map((g) => `<tr style="border-top:1px solid var(--line)">
+          <td style="padding:6px 8px"><input data-gname="${g.id}" value="${esc(g.name)}" style="width:100%;min-width:120px;${inp}"/></td>
+          <td style="padding:6px 8px"><select data-gstatus="${g.id}" style="${inp};color:${GS_COLOR[g.status] || ""}">${GUEST_STATUS.map(([v, l]) => `<option value="${v}" ${g.status === v ? "selected" : ""}>${l}</option>`).join("")}</select></td>
+          <td style="padding:6px 8px"><input type="number" min="0" data-gplus="${g.id}" value="${Number(g.plus_count) || 0}" style="width:70px;${inp}"/></td>
+          <td style="padding:6px 8px"><input data-gnotes="${g.id}" value="${esc(g.notes || "")}" placeholder="—" style="width:100%;min-width:120px;${inp}"/></td>
+          <td style="padding:6px 8px"><button class="btn small ghost danger" data-gdel="${g.id}" title="Remove">✕</button></td></tr>`).join("")}</tbody>
+      </table></div>` : `<div class="empty" style="padding:24px">No one on the list yet — add the first name above.</div>`}
+    </div>
+  </div>`;
+}
+
 function peopleView() {
   const d = state.data;
   return `<div style="display:flex;align-items:center;margin-bottom:14px"><div><h1 style="margin:0;font-size:18px">The crew</h1><div class="countdown">Each person gets a private link showing only their tasks, on their channel.</div></div><div class="grow"></div><button class="btn primary" data-add-person>+ Add person</button></div>
@@ -660,6 +702,13 @@ function wireCanvas() {
   appEl.querySelectorAll("[data-edit-person]").forEach((b) => (b.onclick = () => openPersonModal(Number(b.dataset.editPerson))));
   appEl.querySelectorAll("[data-del-person]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this person?")) return; await del("/api/people/" + b.dataset.delPerson); await refresh(); render(); }));
   appEl.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = () => { const url = location.origin + "/me/" + b.dataset.copy; navigator.clipboard.writeText(url).then(() => toast("Link copied")).catch(() => prompt("Copy:", url)); }));
+  // guests
+  const agb = $("[data-add-guest]"); if (agb) { const addG = async () => { const name = $("#gName").value.trim(); if (!name) return; const plus = $("#gPlus").value ? Number($("#gPlus").value) : 0; await post("/api/guests", { name, plus_count: plus }); await refresh(); render(); }; agb.onclick = addG; const gn = $("#gName"); if (gn) gn.onkeydown = (e) => { if (e.key === "Enter") addG(); }; }
+  appEl.querySelectorAll("[data-gname]").forEach((i) => (i.onchange = async () => { await patch("/api/guests/" + i.dataset.gname, { name: i.value.trim() || "(unnamed)" }); }));
+  appEl.querySelectorAll("[data-gnotes]").forEach((i) => (i.onchange = async () => { await patch("/api/guests/" + i.dataset.gnotes, { notes: i.value.trim() || null }); }));
+  appEl.querySelectorAll("[data-gstatus]").forEach((s) => (s.onchange = async () => { await patch("/api/guests/" + s.dataset.gstatus, { status: s.value }); await refresh(); render(); }));
+  appEl.querySelectorAll("[data-gplus]").forEach((i) => (i.onchange = async () => { await patch("/api/guests/" + i.dataset.gplus, { plus_count: i.value ? Number(i.value) : 0 }); await refresh(); render(); }));
+  appEl.querySelectorAll("[data-gdel]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this guest?")) return; await del("/api/guests/" + b.dataset.gdel); await refresh(); render(); }));
   // settings
   const spb = $("[data-save-party]"); if (spb) spb.onclick = async () => { await patch("/api/party", { name: $("#stName").value.trim(), event_date: $("#stDate").value || null, start_time: $("#stTime").value.trim() || null, location: $("#stLoc").value.trim() || null, theme: $("#stTheme").value.trim() || null, headcount_target: $("#stHead").value ? Number($("#stHead").value) : null, budget_target: $("#stBudget").value ? Number($("#stBudget").value) : null, notes: $("#stNotes").value.trim() || null, cal_details: $("#stCal").value.trim() || null }); await refresh(); render(); toast("Saved"); };
   const pubb = $("[data-save-public]"); if (pubb) pubb.onclick = async () => { const fields = [...appEl.querySelectorAll("[data-pub]:checked")].map((c) => c.dataset.pub).join(","); await patch("/api/party", { public_fields: fields }); await refresh(); render(); toast("Public info updated"); };

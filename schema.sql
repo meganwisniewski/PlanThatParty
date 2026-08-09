@@ -111,6 +111,18 @@ CREATE TABLE IF NOT EXISTS idea_comments (
   created_at       TEXT DEFAULT (datetime('now'))
 );
 
+-- A private, informal guest list (host-only). The party is open — people
+-- just show up — so this is only for jotting who we're expecting.
+CREATE TABLE IF NOT EXISTS guests (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL,
+  status     TEXT DEFAULT 'invited',   -- invited | coming | maybe | cant
+  plus_count INTEGER DEFAULT 0,        -- extra heads beyond this person
+  contact    TEXT,
+  notes      TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 -- The always-available "how's this working for you?" widget writes here.
 CREATE TABLE IF NOT EXISTS feedback (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
