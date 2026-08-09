@@ -66,6 +66,14 @@ const IS_EMOJI = { submitted: "💡", screening: "🔍", approved: "✅", promot
 const IS_COLOR = { submitted: "#b45309", screening: "#1d4ed8", approved: "#15803d", promoted: "#7c3aed", declined: "#b42318", parked: "#5c6470" };
 function voterKey() { let k = localStorage.getItem("ptp_voter"); if (!k) { k = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)); localStorage.setItem("ptp_voter", k); } return k; }
 let ideasData = [];
+// Shrink an image file to a data URL — keeps photos small enough to store inline.
+function resizeImage(file, maxDim, quality) {
+  return new Promise((resolve, reject) => {
+    const img = new Image(); const url = URL.createObjectURL(file);
+    img.onload = () => { URL.revokeObjectURL(url); let w = img.width, h = img.height; const s = Math.min(1, maxDim / Math.max(w, h)); w = Math.round(w * s); h = Math.round(h * s); const c = document.createElement("canvas"); c.width = w; c.height = h; c.getContext("2d").drawImage(img, 0, 0, w, h); resolve(c.toDataURL("image/jpeg", quality)); };
+    img.onerror = reject; img.src = url;
+  });
+}
 // A distinct identity color per planning area/phase (feedback: colored pills, not grey).
 const AREA_PALETTE = ["#ea6a1e", "#7c3aed", "#2563eb", "#0891b2", "#16a34a", "#ca8a04", "#dc2626", "#db2777", "#4f46e5", "#0d9488"];
 function areaColor(a) {
@@ -704,11 +712,13 @@ function ideasList() {
 }
 function ideaCard(i) {
   return `<div class="bcard" data-idea="${i.id}">
+    ${i.thumb ? `<img src="${i.thumb}" style="width:100%;max-height:120px;object-fit:cover;border-radius:6px;margin-bottom:6px"/>` : ""}
     <div class="bt">${esc(i.title)}</div>
     <div class="brow">${i.area_emoji ? `<span>${i.area_emoji} ${esc(i.area_name || "")}</span>` : ""}<span>${esc(i.submitter_person_name || i.submitter_name || "Anon")}</span></div>
     <div class="brow" style="margin-top:6px">
       <button class="btn small ghost" data-vote="${i.id}">👍 ${i.votes || 0}</button>
       <span class="chip">💬 ${i.comments || 0}</span>
+      ${i.images ? `<span class="chip">📷 ${i.images}</span>` : ""}
       ${i.impact || i.effort ? `<span class="chip" title="impact / effort">I${i.impact || "–"}·E${i.effort || "–"}</span>` : ""}
       ${i.stage === "promoted" && i.promoted_task_id ? `<span class="chip" style="color:var(--accent-purple)">→ task</span>` : ""}
     </div>
@@ -726,21 +736,34 @@ function wireIdeas(mount) {
   mount.querySelectorAll("[data-idea]").forEach((c) => (c.onclick = () => openIdeaDetail(Number(c.dataset.idea))));
 }
 function openIdeaModal(personId, personName, onDone) {
-  const areaOpts = `<option value="">— area (optional) —</option>` + (state.data ? state.data.areas : (volCtx.data && volCtx.data.areas) || []).map((a) => `<option value="${a.id}">${a.emoji || ""} ${esc(a.name)}</option>`).join("");
-  const hasAreas = state.data && state.data.areas;
+  let photos = [];
+  const areasSrc = (state.data ? state.data.areas : (volCtx.data && volCtx.data.areas)) || [];
+  const areaOpts = `<option value="">— area (optional) —</option>` + areasSrc.map((a) => `<option value="${a.id}">${a.emoji || ""} ${esc(a.name)}</option>`).join("");
+  const hasAreas = areasSrc.length > 0;
   modal(`<h3>Share an idea</h3><p class="hint">A suggestion for the party — decor, food, a bit of theatre, anything. It enters the pipeline for review.</p>
     <label class="field"><span>Idea</span><input id="iTitle" placeholder="One line — what's the idea?"/></label>
     <label class="field"><span>Details (optional)</span><textarea id="iDesc" rows="3" placeholder="Anything that helps explain it"></textarea></label>
+    <label class="field"><span>Photos (optional)</span><input id="iPhotos" type="file" accept="image/*" multiple/><div id="iPrev" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"></div></label>
     <div class="field ${hasAreas ? "two" : ""}">${hasAreas ? `<label><span>Area (optional)</span><select id="iArea">${areaOpts}</select></label>` : ""}${personId ? "" : `<label><span>Your name (optional)</span><input id="iName" value="${esc(personName || "")}"/></label>`}</div>`,
     async () => {
       const title = $("#iTitle").value.trim(); if (!title) throw new Error("Give it a one-line title");
-      await post("/api/ideas", { title, description: $("#iDesc").value.trim() || null, area_id: ($("#iArea") ? $("#iArea").value : "") || null, submitter_person_id: personId || null, submitter_name: personId ? null : ($("#iName") ? $("#iName").value.trim() : null) });
+      await post("/api/ideas", { title, description: $("#iDesc").value.trim() || null, area_id: ($("#iArea") ? $("#iArea").value : "") || null, submitter_person_id: personId || null, submitter_name: personId ? null : ($("#iName") ? $("#iName").value.trim() : null), thumb: photos[0] ? photos[0].thumb : null, images: photos.map((p) => p.full) });
       toast("Idea shared 🎉"); if (onDone) onDone(); else await mountIdeas();
     });
+  const box = document.body.lastElementChild;
+  const inp = box.querySelector("#iPhotos"), prev = box.querySelector("#iPrev");
+  const renderPrev = () => { prev.innerHTML = photos.map((p, idx) => `<div style="position:relative"><img src="${p.thumb}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"/><button type="button" data-rmp="${idx}" style="position:absolute;top:-6px;right:-6px;background:#b42318;color:#fff;border:none;border-radius:50%;width:18px;height:18px;line-height:1;cursor:pointer;font-size:12px">×</button></div>`).join(""); prev.querySelectorAll("[data-rmp]").forEach((b) => (b.onclick = () => { photos.splice(Number(b.dataset.rmp), 1); renderPrev(); })); };
+  if (inp) inp.onchange = async () => {
+    const files = [...inp.files].slice(0, 6 - photos.length); inp.value = "";
+    prev.insertAdjacentHTML("beforeend", `<span class="meta" id="iUp" style="align-self:center">adding…</span>`);
+    for (const f of files) { try { const full = await resizeImage(f, 1400, 0.75); const thumb = await resizeImage(f, 240, 0.6); photos.push({ full, thumb }); } catch {} }
+    renderPrev();
+  };
 }
 async function openIdeaDetail(id) {
   const i = ideasData.find((x) => x.id == id); if (!i) return;
   let comments = []; try { comments = await get(`/api/ideas/${id}/comments`); } catch {}
+  let images = []; try { images = await get(`/api/ideas/${id}/images`); } catch {}
   const admin = !!getPin() && !!state.data;
   const areaOpts = state.data ? `<option value="">—</option>` + state.data.areas.map((a) => `<option value="${a.id}" ${i.area_id == a.id ? "selected" : ""}>${a.emoji || ""} ${esc(a.name)}</option>`).join("") : "";
   modal(`
@@ -752,6 +775,7 @@ async function openIdeaDetail(id) {
       ${i.area_emoji ? `<span class="chip">${i.area_emoji} ${esc(i.area_name || "")}</span>` : ""}
       <span style="color:var(--muted);font-size:12px">by ${esc(i.submitter_person_name || i.submitter_name || "Anonymous")}</span>
     </div>
+    ${images.length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${images.map((im) => `<img src="${im.data}" style="max-width:150px;max-height:150px;border-radius:8px;border:1px solid var(--line)"/>`).join("")}</div>` : ""}
     ${admin ? `<div class="fact-box" style="background:var(--surface-2);border-color:var(--line)">
       <div class="field two"><label><span>Stage</span><select id="dStage">${IDEA_STAGES.map((s) => `<option value="${s}" ${i.stage === s ? "selected" : ""}>${IS_EMOJI[s]} ${IS_LABEL[s]}</option>`).join("")}</select></label><label><span>Area</span><select id="dArea">${areaOpts}</select></label></div>
       <div class="field two"><label><span>Impact (1-5)</span><input id="dImpact" type="number" min="1" max="5" value="${i.impact || ""}"/></label><label><span>Effort (1-5)</span><input id="dEffort" type="number" min="1" max="5" value="${i.effort || ""}"/></label></div>
@@ -799,11 +823,13 @@ async function mountPublicIdeas() {
   const host = $("#pubIdeas"); if (!host) return;
   let list = []; try { list = await get("/api/ideas"); } catch (e) { host.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
   ideasData = list;
+  const shown = list.filter((i) => i.stage !== "promoted"); // promoted ideas live in the tasks now
   host.innerHTML = `
     <div style="display:flex;gap:10px;align-items:center;margin:16px 0;flex-wrap:wrap"><div class="countdown" style="flex:1;min-width:180px">Ideas move Submitted → Screening → Approved, and an approved idea can become a real party task.</div><button class="btn primary" id="pubAdd">+ Share an idea</button></div>
-    <div class="grid-wrap" style="padding:6px 14px">${list.length ? list.slice().sort((a, b) => (b.votes || 0) - (a.votes || 0)).map((i) => `
+    <div class="grid-wrap" style="padding:6px 14px">${shown.length ? shown.slice().sort((a, b) => (b.votes || 0) - (a.votes || 0)).map((i) => `
       <div class="fbrow" data-pidea="${i.id}" style="cursor:pointer;align-items:center"><button class="btn small ghost" data-pvote="${i.id}">👍 ${i.votes || 0}</button>
-        <div class="fm"><div style="font-weight:600">${esc(i.title)}</div><div class="meta">${esc(i.submitter_person_name || i.submitter_name || "Anonymous")} · <span style="color:${IS_COLOR[i.stage]}">${IS_EMOJI[i.stage]} ${IS_LABEL[i.stage]}</span> · 💬 ${i.comments || 0}</div></div></div>`).join("") : `<div class="empty">No ideas yet — be the first!</div>`}</div>
+        ${i.thumb ? `<img src="${i.thumb}" style="width:46px;height:46px;object-fit:cover;border-radius:8px;flex:none"/>` : ""}
+        <div class="fm"><div style="font-weight:600">${esc(i.title)}</div><div class="meta">${esc(i.submitter_person_name || i.submitter_name || "Anonymous")} · <span style="color:${IS_COLOR[i.stage]}">${IS_EMOJI[i.stage]} ${IS_LABEL[i.stage]}</span> · 💬 ${i.comments || 0}${i.images ? ` · 📷 ${i.images}` : ""}</div></div></div>`).join("") : `<div class="empty">No ideas yet — be the first!</div>`}</div>
     <p class="empty" style="font-size:13px">Tap an idea to read it, vote, or comment.</p>`;
   $("#pubAdd").onclick = () => openIdeaModal(null, "", () => mountPublicIdeas());
   host.querySelectorAll("[data-pvote]").forEach((b) => (b.onclick = async (e) => { e.stopPropagation(); await doVote(b.dataset.pvote); mountPublicIdeas(); }));
@@ -936,10 +962,11 @@ async function mountVolIdeas() {
   host.innerHTML = `<div class="section-title">💡 Party ideas${isApprover ? " · you're an approver" : ""}</div>
     <div class="facts" style="margin-top:0">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap"><div class="countdown" style="flex:1;min-width:160px">Got a suggestion? Share it${isApprover ? " — and as an approver, you can move ideas through the pipeline right here." : " — the coordinator reviews every idea."}</div><button class="btn primary small" id="volAddIdea">+ Share an idea</button></div>
-      ${list.length ? list.slice().sort((a, b) => (b.votes || 0) - (a.votes || 0)).slice(0, 20).map((i) => `
+      ${(() => { const shown = list.filter((i) => i.stage !== "promoted"); return shown.length ? shown.sort((a, b) => (b.votes || 0) - (a.votes || 0)).slice(0, 20).map((i) => `
         <div class="fbrow" style="align-items:center"><button class="btn small ghost" data-volvote="${i.id}">👍 ${i.votes || 0}</button>
-          <div class="fm"><div style="font-weight:600">${esc(i.title)}</div><div class="meta">${esc(i.submitter_person_name || i.submitter_name || "Anon")} · 💬 ${i.comments || 0}</div></div>
-          ${isApprover ? `<select class="stsel" data-volstage="${i.id}">${IDEA_STAGES.map((s) => `<option value="${s}" ${i.stage === s ? "selected" : ""}>${IS_EMOJI[s]} ${IS_LABEL[s]}</option>`).join("")}</select>` : `<span class="chip" style="color:${IS_COLOR[i.stage]}">${IS_EMOJI[i.stage]} ${IS_LABEL[i.stage]}</span>`}</div>`).join("") : `<div class="empty" style="font-size:13px">No ideas yet — be the first.</div>`}
+          ${i.thumb ? `<img src="${i.thumb}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;flex:none"/>` : ""}
+          <div class="fm"><div style="font-weight:600">${esc(i.title)}</div><div class="meta">${esc(i.submitter_person_name || i.submitter_name || "Anon")} · 💬 ${i.comments || 0}${i.images ? ` · 📷 ${i.images}` : ""}</div></div>
+          ${isApprover ? `<select class="stsel" data-volstage="${i.id}">${IDEA_STAGES.map((s) => `<option value="${s}" ${i.stage === s ? "selected" : ""}>${IS_EMOJI[s]} ${IS_LABEL[s]}</option>`).join("")}</select>` : `<span class="chip" style="color:${IS_COLOR[i.stage]}">${IS_EMOJI[i.stage]} ${IS_LABEL[i.stage]}</span>`}</div>`).join("") : `<div class="empty" style="font-size:13px">No ideas yet — be the first.</div>`; })()}
     </div>`;
   const add = $("#volAddIdea"); if (add) add.onclick = () => openIdeaModal(volCtx.data.person.id, volCtx.data.person.name, () => mountVolIdeas());
   host.querySelectorAll("[data-volvote]").forEach((b) => (b.onclick = async () => { await doVote(b.dataset.volvote); mountVolIdeas(); }));

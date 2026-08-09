@@ -294,7 +294,8 @@ async function api(request, env, path) {
       const rows = (await env.DB.prepare(
         `SELECT i.*, a.name AS area_name, a.emoji AS area_emoji, p.name AS submitter_person_name,
            (SELECT COUNT(*) FROM idea_votes v WHERE v.idea_id = i.id) AS votes,
-           (SELECT COUNT(*) FROM idea_comments c WHERE c.idea_id = i.id) AS comments
+           (SELECT COUNT(*) FROM idea_comments c WHERE c.idea_id = i.id) AS comments,
+           (SELECT COUNT(*) FROM idea_images im WHERE im.idea_id = i.id) AS images
          FROM ideas i LEFT JOIN areas a ON a.id = i.area_id LEFT JOIN people p ON p.id = i.submitter_person_id
          ORDER BY i.created_at DESC`
       ).all()).results;
@@ -306,13 +307,19 @@ async function api(request, env, path) {
       ).bind(id).all()).results;
       return json(rows);
     }
+    if (method === "GET" && id && seg[3] === "images") {
+      const rows = (await env.DB.prepare("SELECT id, data FROM idea_images WHERE idea_id = ? ORDER BY id").bind(id).all()).results;
+      return json(rows);
+    }
     if (method === "POST" && !id) {
       const b = await body(request);
       if (!b.title || !b.title.trim()) return err("Give the idea a title.");
       const r = await env.DB.prepare(
-        `INSERT INTO ideas (title, description, submitter_name, submitter_person_id, area_id, category) VALUES (?,?,?,?,?,?)`
-      ).bind(b.title.trim(), b.description || null, b.submitter_name || null, b.submitter_person_id || null, b.area_id || null, b.category || null).run();
-      return json({ id: r.meta.last_row_id }, 201);
+        `INSERT INTO ideas (title, description, submitter_name, submitter_person_id, area_id, category, thumb) VALUES (?,?,?,?,?,?,?)`
+      ).bind(b.title.trim(), b.description || null, b.submitter_name || null, b.submitter_person_id || null, b.area_id || null, b.category || null, b.thumb || null).run();
+      const ideaId = r.meta.last_row_id;
+      if (Array.isArray(b.images)) { for (const img of b.images.slice(0, 6)) { if (typeof img === "string" && img.length < 900000) await env.DB.prepare("INSERT INTO idea_images (idea_id, data) VALUES (?,?)").bind(ideaId, img).run(); } }
+      return json({ id: ideaId }, 201);
     }
     if (method === "POST" && id && seg[3] === "vote") {
       const { voter_key } = await body(request);
@@ -340,6 +347,7 @@ async function api(request, env, path) {
     if (method === "DELETE" && id) {
       await env.DB.prepare("DELETE FROM idea_votes WHERE idea_id = ?").bind(id).run();
       await env.DB.prepare("DELETE FROM idea_comments WHERE idea_id = ?").bind(id).run();
+      await env.DB.prepare("DELETE FROM idea_images WHERE idea_id = ?").bind(id).run();
       await env.DB.prepare("DELETE FROM ideas WHERE id = ?").bind(id).run();
       return json({ ok: true });
     }

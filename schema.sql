@@ -83,7 +83,14 @@ CREATE TABLE IF NOT EXISTS ideas (
   effort              INTEGER,                    -- 1..5, optional score
   decision_note       TEXT,                       -- why approved/declined
   promoted_task_id    INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+  thumb               TEXT,                        -- tiny inline preview (data URL) for cards
   created_at          TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS idea_images (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  idea_id    INTEGER REFERENCES ideas(id) ON DELETE CASCADE,
+  data       TEXT,                                 -- compressed image as a data URL
+  created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS idea_votes (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
