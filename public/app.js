@@ -9,6 +9,7 @@ const esc = (s) => (s == null ? "" : String(s)).replace(/[&<>"']/g, (c) => ({ "&
 const PIN_KEY = "ptp_admin_pin";
 const getPin = () => localStorage.getItem(PIN_KEY) || "";
 const setPin = (p) => localStorage.setItem(PIN_KEY, p);
+const clearPin = () => localStorage.removeItem(PIN_KEY);
 
 async function apiFetch(path, opts = {}) {
   const headers = Object.assign({ "content-type": "application/json" }, opts.headers || {});
@@ -104,7 +105,45 @@ function route() {
   if (location.pathname.replace(/\/+$/, "") === "/ideas") return renderPublicIdeas();
   const m = location.pathname.match(/^\/me\/([a-z0-9]+)/i);
   if (m) return renderVolunteer(m[1]);
-  return renderAdmin();
+  return renderRoot();
+}
+
+// The root URL is tiered: hosts (with the PIN) get the full plan; everyone
+// else gets the guest page — public info only (currently just date & time).
+async function renderRoot() {
+  if (getPin()) {
+    try { state.data = await get("/api/state"); fab.hidden = false; fab.dataset.person = ""; render(); return; }
+    catch (e) { if (e.status === 401) clearPin(); else { appEl.innerHTML = `<div class="boot">Couldn't load: ${esc(e.message)}</div>`; return; } }
+  }
+  return renderGuest();
+}
+
+// Guest page — public info only. No plan, no tasks, no location, no theme.
+async function renderGuest() {
+  fab.hidden = false; fab.dataset.person = ""; fab.dataset.name = ""; window.__approverToken = null;
+  let p = {}; try { p = await get("/api/public"); } catch {}
+  const when = [p.event_date ? fmtDate(p.event_date) : "", p.start_time].filter(Boolean).join(" · ");
+  const cd = countdown(p.event_date);
+  const gcal = googleCalUrl(p);
+  appEl.innerHTML = `
+    <div class="vol-head"><h1>🎃 ${esc(p.name || "The Halloween Party")}</h1><p>Save the date — details are still coming together. 👻</p></div>
+    <div class="vol-wrap">
+      <div class="facts" style="margin-top:18px;text-align:center">
+        ${when ? `<div style="font-size:26px;font-weight:800;letter-spacing:.3px;margin-bottom:6px">${esc(when)}</div>` : `<div style="font-size:20px;font-weight:700;margin-bottom:6px">Date coming soon</div>`}
+        ${cd ? `<div class="countdown" style="display:inline-block">🎃 ${esc(cd.text)}</div>` : ""}
+        ${gcal ? `<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:16px">
+          <a class="btn primary" href="${gcal}" target="_blank" rel="noopener">Add date to Google Calendar</a>
+          <a class="btn" href="/api/public/party.ics">Download for Apple / Outlook</a>
+        </div>` : ""}
+      </div>
+      <div class="facts" style="margin-top:16px;text-align:center">
+        <h2>💡 Have an idea?</h2>
+        <p class="countdown" style="margin-bottom:12px">Costumes, food, music, decor — drop a suggestion. No account needed.</p>
+        <a class="btn primary" href="/ideas">Share an idea</a>
+      </div>
+      <p class="empty" style="font-size:12px;margin-top:22px">Helping run the party? <a href="#" id="hostLogin" style="color:var(--accent);font-weight:600">Host login</a></p>
+    </div>`;
+  const hl = $("#hostLogin"); if (hl) hl.onclick = (e) => { e.preventDefault(); askPin(); };
 }
 
 /* ---------------- date helpers ---------------- */
@@ -122,13 +161,7 @@ function countdown(dateStr) {
 function fmtDate(d) { if (!d) return ""; const dt = new Date(d + "T00:00:00"); if (isNaN(dt)) return d; return dt.toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
 function isOverdue(t) { if (!t.due_date || t.status === "done") return false; const dt = new Date(t.due_date + "T23:59:59"); return dt < new Date(); }
 
-/* ---------------- admin app ---------------- */
-async function renderAdmin() {
-  fab.hidden = false; fab.dataset.person = "";
-  try { state.data = await get("/api/state"); }
-  catch (e) { appEl.innerHTML = `<div class="boot">Couldn't load: ${esc(e.message)}</div>`; return; }
-  render();
-}
+/* ---------------- host app ---------------- */
 async function refresh() { state.data = await get("/api/state"); }
 
 function tasksAll() { return state.data.tasks; }
@@ -201,6 +234,7 @@ function sidebar() {
       <button class="nav-item ${state.screen === "ideas" ? "active" : ""}" data-screen="ideas"><span class="emoji">💡</span> Ideas${d.newIdeas ? ` <span class="count">${d.newIdeas}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "feedback" ? "active" : ""}" data-screen="feedback"><span class="emoji">💬</span> Feedback${d.newFeedback ? ` <span class="count">${d.newFeedback}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "settings" ? "active" : ""}" data-screen="settings"><span class="emoji">⚙️</span> Settings</button>
+      <button class="nav-item" data-logout><span class="emoji">🔒</span> Log out (host)</button>
     </div>
   </nav>`;
 }
@@ -550,6 +584,7 @@ function wire() {
   appEl.querySelectorAll("[data-saved]").forEach((b) => (b.onclick = () => { state.screen = "work"; state.dial = 1; state.filter = { areaId: null, saved: b.dataset.saved || null, q: state.filter.q }; state.navOpen = false; render(); }));
   const ov = $("[data-overview]"); if (ov) ov.onclick = () => { state.screen = "work"; state.dial = 0; state.filter = { areaId: null, saved: null, q: "" }; state.navOpen = false; render(); };
   appEl.querySelectorAll("[data-screen]").forEach((b) => (b.onclick = () => { state.screen = b.dataset.screen; state.navOpen = false; render(); if (state.screen === "feedback") mountFeedback(); if (state.screen === "ideas") mountIdeas(); }));
+  const lo = $("[data-logout]"); if (lo) lo.onclick = () => { clearPin(); state.data = null; state.navOpen = false; renderGuest(); };
   const sc = $("[data-saved-clear]"); if (sc) sc.onclick = () => { state.filter = { areaId: null, saved: null, q: "" }; render(); };
   const nt = $("[data-navtoggle]"); if (nt) nt.onclick = () => { state.navOpen = !state.navOpen; render(); };
 
@@ -906,7 +941,7 @@ function startElementPick() {
   document.addEventListener("click", click, true);
   document.addEventListener("keydown", key, true);
 }
-function askPin() { modal(`<h3>Admin PIN</h3><p class="hint">Enter the shared PIN to edit.</p><label class="field"><span>PIN</span><input id="pinInput" type="password"/></label>`, async () => { const v = $("#pinInput").value.trim(); if (!v) return; setPin(v); await renderAdmin(); }); }
+function askPin() { modal(`<h3>Host login</h3><p class="hint">Enter the shared host PIN to open the full plan.</p><label class="field"><span>PIN</span><input id="pinInput" type="password"/></label>`, async () => { const v = $("#pinInput").value.trim(); if (!v) return; setPin(v); try { await get("/api/state"); } catch (e) { clearPin(); throw new Error("That PIN didn't work."); } await renderRoot(); }); }
 
 /* ---------------- dial component ---------------- */
 function dialMarkup(level, labels, id) {

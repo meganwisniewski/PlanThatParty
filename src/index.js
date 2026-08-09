@@ -248,6 +248,28 @@ async function api(request, env, path) {
     return err("Not found.", 404);
   }
 
+  // ---------- Public (guest) info — open to everyone, minimal ----------
+  // Guest-safe calendar: date/time only, no location, theme, or plan notes.
+  if (resource === "public" && id === "party.ics") {
+    const party = await getParty(env);
+    if (!party || !party.event_date) return err("No date yet.", 404);
+    const ev = icsEvent({ uid: "party-1@planthatparty", cal: parseEventTimes(party), summary: party.name || "Halloween Party" });
+    return icsResponse(icsCalendar([ev]), "halloween-party.ics");
+  }
+  if (resource === "public" && method === "GET") {
+    const party = await getParty(env);
+    // Guests get ONLY the date/time — no location, theme, notes, or plan.
+    const cal = party ? parseEventTimes(party) : null;
+    return json({
+      name: party ? party.name : null,
+      event_date: party ? party.event_date : null,
+      start_time: party ? party.start_time : null,
+      calStart: cal ? cal.start : null,
+      calEnd: cal ? cal.end : null,
+      calAllDay: cal ? cal.allDay : null,
+    });
+  }
+
   // ---------- Public party calendar (.ics), open to everyone ----------
   if (resource === "calendar") {
     const party = await getParty(env);
@@ -374,6 +396,9 @@ async function api(request, env, path) {
 
   // Full dashboard snapshot
   if (resource === "state" && method === "GET") {
+    // Host-only: the full plan (tasks, people, everything) requires the admin PIN.
+    const gate = await requireAdmin(request, env);
+    if (gate) return gate;
     const [party, areas, people, tasks, supplies, fb, ni] = await Promise.all([
       getParty(env),
       env.DB.prepare("SELECT * FROM areas ORDER BY sort_order, id").all(),
