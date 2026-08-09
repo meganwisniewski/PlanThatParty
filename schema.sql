@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS ideas (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
   title               TEXT NOT NULL,
   description         TEXT,
+  link                TEXT,                        -- optional reference URL (a build, product, or inspo)
   submitter_name      TEXT,
   submitter_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
   area_id             INTEGER REFERENCES areas(id) ON DELETE SET NULL,
