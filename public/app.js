@@ -93,6 +93,7 @@ const state = {
 
 /* ---------------- router ---------------- */
 function route() {
+  if (location.pathname.replace(/\/+$/, "") === "/ideas") return renderPublicIdeas();
   const m = location.pathname.match(/^\/me\/([a-z0-9]+)/i);
   if (m) return renderVolunteer(m[1]);
   return renderAdmin();
@@ -740,8 +741,8 @@ function openIdeaModal(personId, personName, onDone) {
 async function openIdeaDetail(id) {
   const i = ideasData.find((x) => x.id == id); if (!i) return;
   let comments = []; try { comments = await get(`/api/ideas/${id}/comments`); } catch {}
-  const admin = !!getPin();
-  const areaOpts = `<option value="">—</option>` + state.data.areas.map((a) => `<option value="${a.id}" ${i.area_id == a.id ? "selected" : ""}>${a.emoji || ""} ${esc(a.name)}</option>`).join("");
+  const admin = !!getPin() && !!state.data;
+  const areaOpts = state.data ? `<option value="">—</option>` + state.data.areas.map((a) => `<option value="${a.id}" ${i.area_id == a.id ? "selected" : ""}>${a.emoji || ""} ${esc(a.name)}</option>`).join("") : "";
   modal(`
     <h3 style="margin-bottom:4px">${esc(i.title)}</h3>
     ${i.description ? `<p class="hint">${esc(i.description)}</p>` : ""}
@@ -768,7 +769,7 @@ async function openIdeaDetail(id) {
   const box = document.body.lastElementChild;
   const q = (s) => box.querySelector(s);
   q("#dVote").onclick = async () => { const r = await doVote(id); q("#dVote").textContent = `👍 ${r.votes}`; };
-  q("#dCommentBtn").onclick = async () => { const v = q("#dComment").value.trim(); if (!v) return; await post(`/api/ideas/${id}/comment`, { body: v, author_name: fab.dataset.name || null, author_person_id: fab.dataset.person || null }); box.remove(); await mountIdeas(); openIdeaDetail(id); };
+  q("#dCommentBtn").onclick = async () => { const v = q("#dComment").value.trim(); if (!v) return; await post(`/api/ideas/${id}/comment`, { body: v, author_name: fab.dataset.name || null, author_person_id: fab.dataset.person || null }); box.remove(); ideasData = await get("/api/ideas").catch(() => ideasData); if ($("#ideasmount")) drawIdeas(); else if ($("#pubIdeas")) mountPublicIdeas(); else if ($("#volIdeas")) mountVolIdeas(); openIdeaDetail(id); };
   if (admin) {
     q("#dSave").onclick = async () => { await patch(`/api/ideas/${id}`, { stage: q("#dStage").value, area_id: q("#dArea").value || null, impact: q("#dImpact").value ? Number(q("#dImpact").value) : null, effort: q("#dEffort").value ? Number(q("#dEffort").value) : null, decision_note: q("#dNote").value.trim() || null }); box.remove(); await mountIdeas(); toast("Saved"); };
     const pr = q("#dPromote"); if (pr) pr.onclick = () => { box.remove(); openPromoteModal(i); };
@@ -785,6 +786,28 @@ function openPromoteModal(idea) {
       await post(`/api/ideas/${idea.id}/promote`, { area_id: $("#prArea").value || null, assignee_id: $("#prOwner").value || null, priority: $("#prPrio").value, due_date: $("#prDue").value || null });
       await refresh(); await mountIdeas(); toast("Promoted → task created 🎯");
     });
+}
+
+/* ---------------- public idea drop-box (/ideas) ---------------- */
+async function renderPublicIdeas() {
+  fab.hidden = false; fab.dataset.person = ""; fab.dataset.name = ""; window.__approverToken = null;
+  appEl.innerHTML = `<div class="vol-head"><h1>💡 Josephween — Ideas</h1><p>Got an idea for the party? Drop it here — no account needed. Every idea is reviewed by the hosts.</p></div>
+    <div class="vol-wrap"><div id="pubIdeas"><div class="boot">Loading ideas…</div></div></div>`;
+  await mountPublicIdeas();
+}
+async function mountPublicIdeas() {
+  const host = $("#pubIdeas"); if (!host) return;
+  let list = []; try { list = await get("/api/ideas"); } catch (e) { host.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  ideasData = list;
+  host.innerHTML = `
+    <div style="display:flex;gap:10px;align-items:center;margin:16px 0;flex-wrap:wrap"><div class="countdown" style="flex:1;min-width:180px">Ideas move Submitted → Screening → Approved, and an approved idea can become a real party task.</div><button class="btn primary" id="pubAdd">+ Share an idea</button></div>
+    <div class="grid-wrap" style="padding:6px 14px">${list.length ? list.slice().sort((a, b) => (b.votes || 0) - (a.votes || 0)).map((i) => `
+      <div class="fbrow" data-pidea="${i.id}" style="cursor:pointer;align-items:center"><button class="btn small ghost" data-pvote="${i.id}">👍 ${i.votes || 0}</button>
+        <div class="fm"><div style="font-weight:600">${esc(i.title)}</div><div class="meta">${esc(i.submitter_person_name || i.submitter_name || "Anonymous")} · <span style="color:${IS_COLOR[i.stage]}">${IS_EMOJI[i.stage]} ${IS_LABEL[i.stage]}</span> · 💬 ${i.comments || 0}</div></div></div>`).join("") : `<div class="empty">No ideas yet — be the first!</div>`}</div>
+    <p class="empty" style="font-size:13px">Tap an idea to read it, vote, or comment.</p>`;
+  $("#pubAdd").onclick = () => openIdeaModal(null, "", () => mountPublicIdeas());
+  host.querySelectorAll("[data-pvote]").forEach((b) => (b.onclick = async (e) => { e.stopPropagation(); await doVote(b.dataset.pvote); mountPublicIdeas(); }));
+  host.querySelectorAll("[data-pidea]").forEach((c) => (c.onclick = () => openIdeaDetail(Number(c.dataset.pidea))));
 }
 
 /* ---------------- feedback widget (with element picker) ---------------- */
