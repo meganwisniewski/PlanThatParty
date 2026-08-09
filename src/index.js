@@ -443,7 +443,7 @@ async function api(request, env, path) {
     // Host-only: the full plan (tasks, people, everything) requires the admin PIN.
     const gate = await requireAdmin(request, env);
     if (gate) return gate;
-    const [party, areas, people, tasks, supplies, fb, ni, gu] = await Promise.all([
+    const [party, areas, people, tasks, supplies, fb, ni, gu, cl] = await Promise.all([
       getParty(env),
       env.DB.prepare("SELECT * FROM areas ORDER BY sort_order, id").all(),
       env.DB.prepare("SELECT * FROM people ORDER BY name").all(),
@@ -466,6 +466,7 @@ async function api(request, env, path) {
       env.DB.prepare("SELECT COUNT(*) AS n FROM feedback WHERE status = 'new'").first(),
       env.DB.prepare("SELECT COUNT(*) AS n FROM ideas WHERE stage = 'submitted'").first(),
       env.DB.prepare("SELECT * FROM guests ORDER BY created_at DESC").all(),
+      env.DB.prepare("SELECT * FROM checklist ORDER BY sort_order, id").all(),
     ]);
     return json({
       party: partyClient(party),
@@ -475,6 +476,7 @@ async function api(request, env, path) {
       tasks: tasks.results,
       supplies: supplies.results,
       guests: gu.results,
+      checklist: cl.results,
       newFeedback: fb ? fb.n : 0,
       newIdeas: ni ? ni.n : 0,
     });
@@ -485,6 +487,34 @@ async function api(request, env, path) {
     const b = await body(request);
     await updateRow(env, "party", 1, pick(b, ["name", "event_date", "start_time", "location", "theme", "headcount_target", "budget_target", "notes", "cal_details", "public_fields", "admin_pin"]));
     return json({ ok: true });
+  }
+
+  // ---------- checklist (private, host-only) ----------
+  if (resource === "checklist") {
+    if (method === "GET") {
+      const gate = await requireAdmin(request, env);
+      if (gate) return gate;
+      const rows = (await env.DB.prepare("SELECT * FROM checklist ORDER BY sort_order, id").all()).results;
+      return json(rows);
+    }
+    if (method === "POST") {
+      const b = await body(request);
+      if (!b.label || !b.label.trim()) return err("Item text required.");
+      const r = await env.DB.prepare(
+        "INSERT INTO checklist (section, label, note, done, sort_order) VALUES (?,?,?,?,?)"
+      ).bind(b.section || null, b.label.trim(), b.note || null, b.done ? 1 : 0, b.sort_order || 0).run();
+      return json({ id: r.meta.last_row_id }, 201);
+    }
+    if (method === "PATCH" && id) {
+      const b = await body(request);
+      if ("done" in b) b.done = b.done ? 1 : 0;
+      await updateRow(env, "checklist", id, pick(b, ["section", "label", "note", "done", "sort_order"]));
+      return json({ ok: true });
+    }
+    if (method === "DELETE" && id) {
+      await env.DB.prepare("DELETE FROM checklist WHERE id = ?").bind(id).run();
+      return json({ ok: true });
+    }
   }
 
   // ---------- guests (private, host-only) ----------

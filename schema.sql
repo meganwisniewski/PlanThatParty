@@ -123,6 +123,18 @@ CREATE TABLE IF NOT EXISTS guests (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- A host-only checklist with per-item notes (e.g. working through the hosts
+-- call and capturing answers inline).
+CREATE TABLE IF NOT EXISTS checklist (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  section    TEXT,
+  label      TEXT NOT NULL,
+  note       TEXT,
+  done       INTEGER DEFAULT 0,
+  sort_order INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 -- The always-available "how's this working for you?" widget writes here.
 CREATE TABLE IF NOT EXISTS feedback (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,

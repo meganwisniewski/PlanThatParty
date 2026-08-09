@@ -243,6 +243,7 @@ function sidebar() {
     <div class="nav-group">
       <button class="nav-item ${state.screen === "people" ? "active" : ""}" data-screen="people"><span class="emoji">👥</span> People <span class="count">${d.people.length}</span></button>
       <button class="nav-item ${state.screen === "guests" ? "active" : ""}" data-screen="guests"><span class="emoji">🎟️</span> Guests${(d.guests && d.guests.length) ? ` <span class="count">${d.guests.length}</span>` : ""}</button>
+      ${(() => { const n = (d.checklist || []).filter((c) => !c.done).length; return `<button class="nav-item ${state.screen === "checklist" ? "active" : ""}" data-screen="checklist"><span class="emoji">✅</span> Checklist${n ? ` <span class="count">${n}</span>` : ""}</button>`; })()}
       <button class="nav-item ${state.screen === "ideas" ? "active" : ""}" data-screen="ideas"><span class="emoji">💡</span> Ideas${d.newIdeas ? ` <span class="count">${d.newIdeas}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "feedback" ? "active" : ""}" data-screen="feedback"><span class="emoji">💬</span> Feedback${d.newFeedback ? ` <span class="count">${d.newFeedback}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "settings" ? "active" : ""}" data-screen="settings"><span class="emoji">⚙️</span> Settings</button>
@@ -281,6 +282,7 @@ function topbar(party, cd) {
 function canvas() {
   if (state.screen === "people") return peopleView();
   if (state.screen === "guests") return guestsView();
+  if (state.screen === "checklist") return checklistView();
   if (state.screen === "ideas") return `<div id="ideasmount"><div class="empty">Loading ideas…</div></div>`;
   if (state.screen === "feedback") return `<div id="fbmount"><div class="empty">Loading…</div></div>`;
   if (state.screen === "settings") return settingsView();
@@ -551,6 +553,45 @@ function panel() {
 }
 
 /* ---------------- PEOPLE ---------------- */
+/* ---------------- CHECKLIST (private, host-only) ---------------- */
+function checklistView() {
+  const items = state.data.checklist || [];
+  const done = items.filter((i) => i.done).length;
+  const pct = items.length ? Math.round((done / items.length) * 100) : 0;
+  const inp = "border:1px solid var(--line-strong);border-radius:7px;padding:7px 9px;font:inherit;background:var(--surface)";
+  // group by section, preserving order
+  const groups = [];
+  items.forEach((it) => {
+    let g = groups[groups.length - 1];
+    if (!g || g.section !== (it.section || "")) { g = { section: it.section || "", items: [] }; groups.push(g); }
+    g.items.push(it);
+  });
+  return `<div style="max-width:840px">
+    <div class="facts"><h2>✅ Checklist <span style="color:var(--faint);font-weight:400;font-size:13px">— private to hosts</span></h2>
+      <div class="countdown" style="margin-bottom:12px">Tick items off and jot the answer right on each one. Add your own items anytime.</div>
+      <div style="display:flex;align-items:center;gap:10px"><div style="flex:1;height:8px;background:var(--surface-2);border-radius:5px;overflow:hidden"><div style="width:${pct}%;height:100%;background:var(--accent-strong)"></div></div><div class="meta" style="white-space:nowrap">${done}/${items.length} done</div></div>
+    </div>
+    <div class="facts" style="margin-top:14px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input id="clSection" placeholder="Section (optional)" style="width:200px;${inp}"/>
+        <input id="clLabel" placeholder="Add an item…" style="flex:1;min-width:180px;${inp}"/>
+        <button class="btn primary" data-add-cl>Add</button>
+      </div>
+    </div>
+    ${groups.length ? groups.map((g) => `<div class="facts" style="margin-top:14px">
+      ${g.section ? `<h2 style="font-size:15px;margin:0 0 4px">${esc(g.section)}</h2>` : ""}
+      ${g.items.map((it) => `<div style="display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line)">
+        <input type="checkbox" data-cldone="${it.id}" ${it.done ? "checked" : ""} style="width:18px;height:18px;margin-top:3px;flex:none;cursor:pointer"/>
+        <div style="flex:1;min-width:0">
+          <input data-cllabel="${it.id}" value="${esc(it.label)}" style="width:100%;border:none;background:none;font-weight:600;font-size:14px;padding:2px 0;${it.done ? "text-decoration:line-through;color:var(--muted)" : ""}"/>
+          <textarea data-clnote="${it.id}" rows="2" placeholder="Note / answer…" style="width:100%;margin-top:4px;${inp};resize:vertical;color:var(--muted)">${esc(it.note || "")}</textarea>
+        </div>
+        <button class="btn small ghost danger" data-cldel="${it.id}" title="Remove" style="flex:none">✕</button>
+      </div>`).join("")}
+    </div>`).join("") : `<div class="empty" style="padding:24px">No items yet — add one above.</div>`}
+  </div>`;
+}
+
 /* ---------------- GUESTS (private, host-only) ---------------- */
 const GUEST_STATUS = [["coming", "✅ Coming"], ["maybe", "🤔 Maybe"], ["invited", "✉️ Invited"], ["cant", "❌ Can't"]];
 const GS_COLOR = { coming: "#15803d", maybe: "#b45309", invited: "#5c6470", cant: "#b42318" };
@@ -709,6 +750,12 @@ function wireCanvas() {
   appEl.querySelectorAll("[data-gstatus]").forEach((s) => (s.onchange = async () => { await patch("/api/guests/" + s.dataset.gstatus, { status: s.value }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-gplus]").forEach((i) => (i.onchange = async () => { await patch("/api/guests/" + i.dataset.gplus, { plus_count: i.value ? Number(i.value) : 0 }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-gdel]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this guest?")) return; await del("/api/guests/" + b.dataset.gdel); await refresh(); render(); }));
+  // checklist
+  const acb = $("[data-add-cl]"); if (acb) { const addC = async () => { const label = $("#clLabel").value.trim(); if (!label) return; const section = $("#clSection").value.trim() || null; await post("/api/checklist", { label, section }); await refresh(); render(); }; acb.onclick = addC; const cll = $("#clLabel"); if (cll) cll.onkeydown = (e) => { if (e.key === "Enter") addC(); }; }
+  appEl.querySelectorAll("[data-cldone]").forEach((c) => (c.onchange = async () => { await patch("/api/checklist/" + c.dataset.cldone, { done: c.checked ? 1 : 0 }); await refresh(); render(); }));
+  appEl.querySelectorAll("[data-cllabel]").forEach((i) => (i.onchange = async () => { await patch("/api/checklist/" + i.dataset.cllabel, { label: i.value.trim() || "(untitled)" }); }));
+  appEl.querySelectorAll("[data-clnote]").forEach((t) => (t.onchange = async () => { await patch("/api/checklist/" + t.dataset.clnote, { note: t.value.trim() || null }); }));
+  appEl.querySelectorAll("[data-cldel]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this item?")) return; await del("/api/checklist/" + b.dataset.cldel); await refresh(); render(); }));
   // settings
   const spb = $("[data-save-party]"); if (spb) spb.onclick = async () => { await patch("/api/party", { name: $("#stName").value.trim(), event_date: $("#stDate").value || null, start_time: $("#stTime").value.trim() || null, location: $("#stLoc").value.trim() || null, theme: $("#stTheme").value.trim() || null, headcount_target: $("#stHead").value ? Number($("#stHead").value) : null, budget_target: $("#stBudget").value ? Number($("#stBudget").value) : null, notes: $("#stNotes").value.trim() || null, cal_details: $("#stCal").value.trim() || null }); await refresh(); render(); toast("Saved"); };
   const pubb = $("[data-save-public]"); if (pubb) pubb.onclick = async () => { const fields = [...appEl.querySelectorAll("[data-pub]:checked")].map((c) => c.dataset.pub).join(","); await patch("/api/party", { public_fields: fields }); await refresh(); render(); toast("Public info updated"); };
