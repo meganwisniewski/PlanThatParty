@@ -118,24 +118,35 @@ async function renderRoot() {
   return renderGuest();
 }
 
-// Guest page — public info only. No plan, no tasks, no location, no theme.
+// Guest page — shows only the fields the hosts have marked public.
 async function renderGuest() {
   fab.hidden = false; fab.dataset.person = ""; fab.dataset.name = ""; window.__approverToken = null;
   let p = {}; try { p = await get("/api/public"); } catch {}
-  const when = [p.event_date ? fmtDate(p.event_date) : "", p.start_time].filter(Boolean).join(" · ");
-  const cd = countdown(p.event_date);
-  const gcal = googleCalUrl(p);
+  const has = (k) => p[k] != null && p[k] !== "";
+  const when = [has("event_date") ? fmtDate(p.event_date) : "", has("start_time") ? p.start_time : ""].filter(Boolean).join(" · ");
+  const cd = has("event_date") ? countdown(p.event_date) : null;
+  const gcal = googleCalUrl(p); // only populated when calStart is present (date is public)
+  // Extra public facts beyond the headline date/time.
+  const facts = [];
+  if (has("location")) facts.push(["📍 Where", p.location]);
+  if (has("theme")) facts.push(["🎭 Theme", p.theme]);
+  if (has("headcount_target")) facts.push(["👥 Expected", `~${p.headcount_target} people`]);
+  if (has("budget_target")) facts.push(["💸 Budget", `$${p.budget_target}`]);
   appEl.innerHTML = `
-    <div class="vol-head"><h1>🎃 ${esc(p.name || "The Halloween Party")}</h1><p>Save the date — details are still coming together. 👻</p></div>
+    <div class="vol-head"><h1>🎃 ${esc(has("name") ? p.name : "The Halloween Party")}</h1><p>Save the date — details are still coming together. 👻</p></div>
     <div class="vol-wrap">
       <div class="facts" style="margin-top:18px;text-align:center">
         ${when ? `<div style="font-size:26px;font-weight:800;letter-spacing:.3px;margin-bottom:6px">${esc(when)}</div>` : `<div style="font-size:20px;font-weight:700;margin-bottom:6px">Date coming soon</div>`}
         ${cd ? `<div class="countdown" style="display:inline-block">🎃 ${esc(cd.text)}</div>` : ""}
         ${gcal ? `<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:16px">
-          <a class="btn primary" href="${gcal}" target="_blank" rel="noopener">Add date to Google Calendar</a>
+          <a class="btn primary" href="${gcal}" target="_blank" rel="noopener">Add to Google Calendar</a>
           <a class="btn" href="/api/public/party.ics">Download for Apple / Outlook</a>
         </div>` : ""}
       </div>
+      ${facts.length ? `<div class="facts" style="margin-top:14px"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px">
+        ${facts.map(([l, v]) => `<div><div style="font-size:12px;color:var(--faint);font-weight:700;text-transform:uppercase;letter-spacing:.05em">${l}</div><div style="font-size:16px;font-weight:600;margin-top:2px">${esc(v)}</div></div>`).join("")}
+      </div></div>` : ""}
+      ${has("notes") ? `<div class="facts" style="margin-top:14px"><p style="margin:0;color:var(--muted)">${esc(p.notes)}</p></div>` : ""}
       <div class="facts" style="margin-top:16px;text-align:center">
         <h2>💡 Have an idea?</h2>
         <p class="countdown" style="margin-bottom:12px">Costumes, food, music, decor — drop a suggestion. No account needed.</p>
@@ -568,11 +579,36 @@ function settingsView() {
       <label class="field"><span>📅 Calendar event details</span><textarea id="stCal" rows="6" placeholder="This is exactly what shows up when anyone adds the party to their calendar — address, timing, costume note, parking, ride plan, etc.">${esc(p.cal_details || "")}</textarea><div style="font-size:11px;color:var(--faint);margin-top:4px">Shows in the "Add to calendar" event (Google, Apple, Outlook). Edit freely — it updates every link.</div></label>
       <button class="btn primary" data-save-party>Save details</button>
     </div>
+    ${publicInfoSection(p)}
     <div class="facts" style="margin-top:14px"><h2>Admin PIN</h2>
       <div class="countdown" style="margin-bottom:10px">Protects editing. Volunteers never need it. ${state.data.pinConfigured ? "" : "<b>No PIN set — anyone can edit.</b>"}</div>
       <label class="field"><span>Set / change PIN</span><input id="stPin" placeholder="${state.data.pinConfigured ? "New PIN" : "Choose a PIN"}"/></label>
       <button class="btn" data-save-pin>Save PIN</button>
     </div></div>`;
+}
+
+// Which party fields guests are allowed to see. Hosts pick these.
+const PUBLIC_FIELD_OPTS = [
+  ["name", "Party name"],
+  ["event_date", "Date"],
+  ["start_time", "Start time"],
+  ["location", "Location / address"],
+  ["theme", "Theme"],
+  ["headcount_target", "Headcount target"],
+  ["budget_target", "Budget"],
+  ["notes", "Note to the crew"],
+  ["cal_details", "Calendar event details"],
+];
+function publicSetClient(p) { return new Set(String((p && p.public_fields != null) ? p.public_fields : "name,event_date,start_time").split(",").map((s) => s.trim()).filter(Boolean)); }
+function publicInfoSection(p) {
+  const on = publicSetClient(p);
+  return `<div class="facts" style="margin-top:14px"><h2>👀 Public info — what guests see</h2>
+    <div class="countdown" style="margin-bottom:12px">Anyone with the link, without the PIN, sees only what you check here. Everything else — tasks, people, the plan — stays host-only. Volunteers also see their own tasks.</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px 16px">
+      ${PUBLIC_FIELD_OPTS.map(([k, l]) => `<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input type="checkbox" data-pub="${k}" ${on.has(k) ? "checked" : ""} style="width:auto"/> ${esc(l)}</label>`).join("")}
+    </div>
+    <div style="margin-top:12px"><button class="btn primary" data-save-public>Save public info</button></div>
+  </div>`;
 }
 
 /* ---------------- WIRING ---------------- */
@@ -626,6 +662,7 @@ function wireCanvas() {
   appEl.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = () => { const url = location.origin + "/me/" + b.dataset.copy; navigator.clipboard.writeText(url).then(() => toast("Link copied")).catch(() => prompt("Copy:", url)); }));
   // settings
   const spb = $("[data-save-party]"); if (spb) spb.onclick = async () => { await patch("/api/party", { name: $("#stName").value.trim(), event_date: $("#stDate").value || null, start_time: $("#stTime").value.trim() || null, location: $("#stLoc").value.trim() || null, theme: $("#stTheme").value.trim() || null, headcount_target: $("#stHead").value ? Number($("#stHead").value) : null, budget_target: $("#stBudget").value ? Number($("#stBudget").value) : null, notes: $("#stNotes").value.trim() || null, cal_details: $("#stCal").value.trim() || null }); await refresh(); render(); toast("Saved"); };
+  const pubb = $("[data-save-public]"); if (pubb) pubb.onclick = async () => { const fields = [...appEl.querySelectorAll("[data-pub]:checked")].map((c) => c.dataset.pub).join(","); await patch("/api/party", { public_fields: fields }); await refresh(); render(); toast("Public info updated"); };
   const pinb = $("[data-save-pin]"); if (pinb) pinb.onclick = async () => { const v = $("#stPin").value.trim(); if (!v) return toast("Type a PIN"); await patch("/api/party", { admin_pin: v }); setPin(v); await refresh(); render(); toast("PIN saved"); };
 }
 

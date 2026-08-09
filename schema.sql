@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS party (
   budget_target    REAL,
   notes            TEXT,
   cal_details      TEXT,                     -- editable text shown in calendar-link events
+  public_fields    TEXT DEFAULT 'name,event_date,start_time', -- CSV of fields guests may see
   admin_pin        TEXT
 );
 

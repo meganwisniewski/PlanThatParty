@@ -65,6 +65,13 @@ const pad = (n) => String(n).padStart(2, "0");
 // Best-effort parse of a free-text start_time ("8:00 PM – 3:00 AM", "7pm",
 // "6:30 PM to 11 PM") into structured start/end for a given event_date.
 // Falls back to an all-day event if it can't read a time.
+// Party fields a host may choose to reveal to guests (nothing else is public).
+const PUBLIC_FIELDS = ["name", "event_date", "start_time", "location", "theme", "headcount_target", "budget_target", "notes", "cal_details"];
+function publicSet(party) {
+  const raw = party && party.public_fields != null ? party.public_fields : "name,event_date,start_time";
+  return new Set(String(raw).split(",").map((s) => s.trim()).filter(Boolean));
+}
+
 function parseEventTimes(party) {
   if (!party || !party.event_date) return null;
   const [y, mo, d] = party.event_date.split("-").map(Number);
@@ -249,25 +256,33 @@ async function api(request, env, path) {
   }
 
   // ---------- Public (guest) info — open to everyone, minimal ----------
-  // Guest-safe calendar: date/time only, no location, theme, or plan notes.
+  // Guest-safe calendar: honors the host's public-fields whitelist.
   if (resource === "public" && id === "party.ics") {
     const party = await getParty(env);
-    if (!party || !party.event_date) return err("No date yet.", 404);
-    const ev = icsEvent({ uid: "party-1@planthatparty", cal: parseEventTimes(party), summary: party.name || "Halloween Party" });
+    const pub = publicSet(party);
+    if (!party || !party.event_date || !pub.has("event_date")) return err("No public date yet.", 404);
+    const ev = icsEvent({
+      uid: "party-1@planthatparty",
+      cal: pub.has("start_time") ? parseEventTimes(party) : parseEventTimes({ event_date: party.event_date }),
+      summary: pub.has("name") ? (party.name || "Halloween Party") : "Halloween Party",
+      location: pub.has("location") ? (party.location || "") : "",
+      description: pub.has("cal_details") ? (party.cal_details || "") : "",
+    });
     return icsResponse(icsCalendar([ev]), "halloween-party.ics");
   }
   if (resource === "public" && method === "GET") {
     const party = await getParty(env);
-    // Guests get ONLY the date/time — no location, theme, notes, or plan.
-    const cal = party ? parseEventTimes(party) : null;
-    return json({
-      name: party ? party.name : null,
-      event_date: party ? party.event_date : null,
-      start_time: party ? party.start_time : null,
-      calStart: cal ? cal.start : null,
-      calEnd: cal ? cal.end : null,
-      calAllDay: cal ? cal.allDay : null,
-    });
+    // Guests get ONLY the fields the hosts have marked public.
+    const pub = publicSet(party);
+    const out = {};
+    for (const f of PUBLIC_FIELDS) out[f] = party && pub.has(f) ? party[f] : null;
+    if (party && pub.has("event_date")) {
+      // Only expose the wall-clock time when start_time is also public;
+      // otherwise hand back an all-day (date-only) calendar entry.
+      const cal = pub.has("start_time") ? parseEventTimes(party) : parseEventTimes({ event_date: party.event_date });
+      if (cal) { out.calStart = cal.start; out.calEnd = cal.end; out.calAllDay = cal.allDay; }
+    }
+    return json(out);
   }
 
   // ---------- Public party calendar (.ics), open to everyone ----------
@@ -437,7 +452,7 @@ async function api(request, env, path) {
   // ---------- party ----------
   if (resource === "party" && method === "PATCH") {
     const b = await body(request);
-    await updateRow(env, "party", 1, pick(b, ["name", "event_date", "start_time", "location", "theme", "headcount_target", "budget_target", "notes", "cal_details", "admin_pin"]));
+    await updateRow(env, "party", 1, pick(b, ["name", "event_date", "start_time", "location", "theme", "headcount_target", "budget_target", "notes", "cal_details", "public_fields", "admin_pin"]));
     return json({ ok: true });
   }
 
