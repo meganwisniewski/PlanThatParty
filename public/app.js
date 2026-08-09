@@ -166,8 +166,7 @@ function countdown(dateStr) {
   if (isNaN(days)) return null;
   if (days < 0) return { text: `${-days} days ago`, days };
   if (days === 0) return { text: "Today! 🎃", days };
-  if (days < 14) return { text: `${days} days out`, days };
-  return { text: `${Math.round(days / 7)} weeks out`, days };
+  return { text: `${days} days out`, days };
 }
 function fmtDate(d) { if (!d) return ""; const dt = new Date(d + "T00:00:00"); if (isNaN(dt)) return d; return dt.toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
 function isOverdue(t) { if (!t.due_date || t.status === "done") return false; const dt = new Date(t.due_date + "T23:59:59"); return dt < new Date(); }
@@ -1071,7 +1070,7 @@ function describeEl(el) {
 function startElementPick() {
   const hint = document.createElement("div");
   hint.textContent = "Click the thing you want feedback about  ·  Esc to cancel";
-  Object.assign(hint.style, { position: "fixed", top: "0", left: "0", right: "0", zIndex: "99999", background: "#7c3aed", color: "#fff", font: "600 13px -apple-system,sans-serif", padding: "11px", textAlign: "center", pointerEvents: "none" });
+  Object.assign(hint.style, { position: "fixed", bottom: "0", left: "0", right: "0", zIndex: "99999", background: "#7c3aed", color: "#fff", font: "600 13px -apple-system,sans-serif", padding: "11px", textAlign: "center", pointerEvents: "none" });
   const hl = document.createElement("div");
   Object.assign(hl.style, { position: "fixed", zIndex: "99998", background: "rgba(124,58,237,0.14)", border: "2px solid #7c3aed", borderRadius: "4px", pointerEvents: "none", display: "none" });
   document.body.appendChild(hint); document.body.appendChild(hl);
