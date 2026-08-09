@@ -13,7 +13,13 @@ const clearPin = () => localStorage.removeItem(PIN_KEY);
 
 async function apiFetch(path, opts = {}) {
   const headers = Object.assign({ "content-type": "application/json" }, opts.headers || {});
-  if (getPin()) headers["x-admin-pin"] = getPin();
+  // On visitor-facing pages (a volunteer link or the public /ideas box) never
+  // attach the host PIN — so previewing them shows exactly what that visitor
+  // sees, not the host-authorized view. Approver access still flows through
+  // the volunteer's own token below.
+  const p = location.pathname.replace(/\/+$/, "");
+  const publicView = /^\/me\//.test(location.pathname) || p === "/ideas";
+  if (getPin() && !publicView) headers["x-admin-pin"] = getPin();
   if (window.__approverToken) headers["x-approver-token"] = window.__approverToken;
   const res = await fetch(path, Object.assign({}, opts, { headers }));
   let data = null; try { data = await res.json(); } catch {}
