@@ -792,6 +792,7 @@ function ideaCard(i) {
       <span class="chip">💬 ${i.comments || 0}</span>
       ${i.images ? `<span class="chip">📷 ${i.images}</span>` : ""}
       ${i.link ? `<span class="chip" title="has a reference link">🔗</span>` : ""}
+      ${i.admin_only ? `<span class="chip" style="color:#b42318" title="Hosts only — hidden from public & volunteer lists">🔒</span>` : ""}
       ${i.impact || i.effort ? `<span class="chip" title="impact / effort">I${i.impact || "–"}·E${i.effort || "–"}</span>` : ""}
       ${i.stage === "promoted" && i.promoted_task_id ? `<span class="chip" style="color:var(--accent-purple)">→ task</span>` : ""}
     </div>
@@ -813,15 +814,17 @@ function openIdeaModal(personId, personName, onDone) {
   const areasSrc = (state.data ? state.data.areas : (volCtx.data && volCtx.data.areas)) || [];
   const areaOpts = `<option value="">— area (optional) —</option>` + areasSrc.map((a) => `<option value="${a.id}">${a.emoji || ""} ${esc(a.name)}</option>`).join("");
   const hasAreas = areasSrc.length > 0;
+  const canFlag = (!!getPin() && !!state.data) || !!window.__approverToken; // host or approver
   modal(`<h3>Share an idea</h3><p class="hint">A suggestion for the party — decor, food, a bit of theatre, anything. It enters the pipeline for review.</p>
     <label class="field"><span>Idea</span><input id="iTitle" placeholder="One line — what's the idea?"/></label>
     <label class="field"><span>Details (optional)</span><textarea id="iDesc" rows="3" placeholder="Anything that helps explain it"></textarea></label>
     <label class="field"><span>Link (optional)</span><input id="iLink" type="url" inputmode="url" placeholder="Paste a URL — a build, product, or inspo photo"/></label>
     <label class="field"><span>Photos (optional)</span><input id="iPhotos" type="file" accept="image/*" multiple/><div id="iPrev" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"></div></label>
-    <div class="field ${hasAreas ? "two" : ""}">${hasAreas ? `<label><span>Area (optional)</span><select id="iArea">${areaOpts}</select></label>` : ""}${personId ? "" : `<label><span>Your name (optional)</span><input id="iName" value="${esc(personName || "")}"/></label>`}</div>`,
+    <div class="field ${hasAreas ? "two" : ""}">${hasAreas ? `<label><span>Area (optional)</span><select id="iArea">${areaOpts}</select></label>` : ""}${personId ? "" : `<label><span>Your name (optional)</span><input id="iName" value="${esc(personName || "")}"/></label>`}</div>
+    ${canFlag ? `<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;margin-top:2px"><input type="checkbox" id="iAdminOnly" style="width:auto"/> 🔒 Hosts only <span style="color:var(--faint);font-size:12px">— hidden from the public &amp; volunteer lists</span></label>` : ""}`,
     async () => {
       const title = $("#iTitle").value.trim(); if (!title) throw new Error("Give it a one-line title");
-      await post("/api/ideas", { title, description: $("#iDesc").value.trim() || null, link: $("#iLink").value.trim() || null, area_id: ($("#iArea") ? $("#iArea").value : "") || null, submitter_person_id: personId || null, submitter_name: personId ? null : ($("#iName") ? $("#iName").value.trim() : null), thumb: photos[0] ? photos[0].thumb : null, images: photos.map((p) => p.full) });
+      await post("/api/ideas", { title, description: $("#iDesc").value.trim() || null, link: $("#iLink").value.trim() || null, area_id: ($("#iArea") ? $("#iArea").value : "") || null, submitter_person_id: personId || null, submitter_name: personId ? null : ($("#iName") ? $("#iName").value.trim() : null), thumb: photos[0] ? photos[0].thumb : null, images: photos.map((p) => p.full), admin_only: ($("#iAdminOnly") && $("#iAdminOnly").checked) ? 1 : 0 });
       toast("Idea shared 🎉"); if (onDone) onDone(); else await mountIdeas();
     });
   const box = document.body.lastElementChild;
@@ -847,6 +850,7 @@ async function openIdeaDetail(id) {
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
       <button class="btn small" id="dVote">👍 ${i.votes || 0}</button>
       <span class="chip" style="color:${IS_COLOR[i.stage]}">${IS_EMOJI[i.stage]} ${IS_LABEL[i.stage]}</span>
+      ${i.admin_only ? `<span class="chip" style="color:#b42318" title="Hidden from public & volunteer lists">🔒 Hosts only</span>` : ""}
       ${i.area_emoji ? `<span class="chip">${i.area_emoji} ${esc(i.area_name || "")}</span>` : ""}
       <span style="color:var(--muted);font-size:12px">by ${esc(i.submitter_person_name || i.submitter_name || "Anonymous")}</span>
     </div>
@@ -856,6 +860,7 @@ async function openIdeaDetail(id) {
       <div class="field two"><label><span>Impact (1-5)</span><input id="dImpact" type="number" min="1" max="5" value="${i.impact || ""}"/></label><label><span>Effort (1-5)</span><input id="dEffort" type="number" min="1" max="5" value="${i.effort || ""}"/></label></div>
       <label class="field"><span>Link</span><input id="dLink" value="${esc(i.link || "")}" placeholder="Reference URL"/></label>
       <label class="field"><span>Decision note</span><input id="dNote" value="${esc(i.decision_note || "")}" placeholder="Why approved / declined"/></label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input type="checkbox" id="dAdminOnly" ${i.admin_only ? "checked" : ""} style="width:auto"/> 🔒 Hosts only <span style="color:var(--faint);font-size:12px">— hidden from public &amp; volunteer lists</span></label>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn small" id="dSave">Save</button>
         ${i.stage === "promoted" ? `<span class="chip" style="color:var(--accent-purple)">Promoted → task #${i.promoted_task_id || ""}</span>` : `<button class="btn small primary" id="dPromote">🎯 Promote to task</button>`}
@@ -871,7 +876,7 @@ async function openIdeaDetail(id) {
   q("#dVote").onclick = async () => { const r = await doVote(id); q("#dVote").textContent = `👍 ${r.votes}`; };
   q("#dCommentBtn").onclick = async () => { const v = q("#dComment").value.trim(); if (!v) return; await post(`/api/ideas/${id}/comment`, { body: v, author_name: fab.dataset.name || null, author_person_id: fab.dataset.person || null }); box.remove(); ideasData = await get("/api/ideas").catch(() => ideasData); if ($("#ideasmount")) drawIdeas(); else if ($("#pubIdeas")) mountPublicIdeas(); else if ($("#volIdeas")) mountVolIdeas(); openIdeaDetail(id); };
   if (admin) {
-    q("#dSave").onclick = async () => { await patch(`/api/ideas/${id}`, { stage: q("#dStage").value, area_id: q("#dArea").value || null, link: q("#dLink").value.trim() || null, impact: q("#dImpact").value ? Number(q("#dImpact").value) : null, effort: q("#dEffort").value ? Number(q("#dEffort").value) : null, decision_note: q("#dNote").value.trim() || null }); box.remove(); await mountIdeas(); toast("Saved"); };
+    q("#dSave").onclick = async () => { await patch(`/api/ideas/${id}`, { stage: q("#dStage").value, area_id: q("#dArea").value || null, link: q("#dLink").value.trim() || null, impact: q("#dImpact").value ? Number(q("#dImpact").value) : null, effort: q("#dEffort").value ? Number(q("#dEffort").value) : null, decision_note: q("#dNote").value.trim() || null, admin_only: q("#dAdminOnly").checked ? 1 : 0 }); box.remove(); await mountIdeas(); toast("Saved"); };
     const pr = q("#dPromote"); if (pr) pr.onclick = () => { box.remove(); openPromoteModal(i); };
     q("#dDel").onclick = async () => { if (!confirm("Delete this idea?")) return; await del(`/api/ideas/${id}`); box.remove(); await mountIdeas(); };
   }

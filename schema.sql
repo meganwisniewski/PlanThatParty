@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS ideas (
   effort              INTEGER,                    -- 1..5, optional score
   decision_note       TEXT,                       -- why approved/declined
   promoted_task_id    INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+  admin_only          INTEGER DEFAULT 0,           -- 1 = visible to admins/approvers only
   thumb               TEXT,                        -- tiny inline preview (data URL) for cards
   created_at          TEXT DEFAULT (datetime('now'))
 );

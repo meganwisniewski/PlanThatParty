@@ -47,6 +47,12 @@ async function requireApprover(request, env) {
   return gate;
 }
 
+// Boolean form of requireApprover — true when the request carries the admin
+// PIN or a valid approver token.
+async function isApprover(request, env) {
+  return !(await requireApprover(request, env));
+}
+
 // Look up a person by their private share token.
 async function personByToken(env, token) {
   if (!token) return null;
@@ -338,12 +344,15 @@ async function api(request, env, path) {
   // ---------- Ideas pipeline (open capture, admin moderation) ----------
   if (resource === "ideas") {
     if (method === "GET" && !id) {
+      // Host-only ideas are hidden unless the requester is an admin/approver.
+      const authed = await isApprover(request, env);
       const rows = (await env.DB.prepare(
         `SELECT i.*, a.name AS area_name, a.emoji AS area_emoji, p.name AS submitter_person_name,
            (SELECT COUNT(*) FROM idea_votes v WHERE v.idea_id = i.id) AS votes,
            (SELECT COUNT(*) FROM idea_comments c WHERE c.idea_id = i.id) AS comments,
            (SELECT COUNT(*) FROM idea_images im WHERE im.idea_id = i.id) AS images
          FROM ideas i LEFT JOIN areas a ON a.id = i.area_id LEFT JOIN people p ON p.id = i.submitter_person_id
+         ${authed ? "" : "WHERE i.admin_only = 0"}
          ORDER BY i.created_at DESC`
       ).all()).results;
       return json(rows);
@@ -361,9 +370,11 @@ async function api(request, env, path) {
     if (method === "POST" && !id) {
       const b = await body(request);
       if (!b.title || !b.title.trim()) return err("Give the idea a title.");
+      // Only an admin/approver may file an idea as host-only.
+      const adminOnly = b.admin_only && (await isApprover(request, env)) ? 1 : 0;
       const r = await env.DB.prepare(
-        `INSERT INTO ideas (title, description, link, submitter_name, submitter_person_id, area_id, category, thumb) VALUES (?,?,?,?,?,?,?,?)`
-      ).bind(b.title.trim(), b.description || null, normalizeUrl(b.link), b.submitter_name || null, b.submitter_person_id || null, b.area_id || null, b.category || null, b.thumb || null).run();
+        `INSERT INTO ideas (title, description, link, submitter_name, submitter_person_id, area_id, category, thumb, admin_only) VALUES (?,?,?,?,?,?,?,?,?)`
+      ).bind(b.title.trim(), b.description || null, normalizeUrl(b.link), b.submitter_name || null, b.submitter_person_id || null, b.area_id || null, b.category || null, b.thumb || null, adminOnly).run();
       const ideaId = r.meta.last_row_id;
       if (Array.isArray(b.images)) { for (const img of b.images.slice(0, 6)) { if (typeof img === "string" && img.length < 900000) await env.DB.prepare("INSERT INTO idea_images (idea_id, data) VALUES (?,?)").bind(ideaId, img).run(); } }
       return json({ id: ideaId }, 201);
@@ -389,7 +400,8 @@ async function api(request, env, path) {
     if (method === "PATCH" && id) {
       const b = await body(request);
       if ("link" in b) b.link = normalizeUrl(b.link);
-      await updateRow(env, "ideas", id, pick(b, ["title", "description", "link", "area_id", "category", "stage", "impact", "effort", "decision_note"]));
+      if ("admin_only" in b) b.admin_only = b.admin_only ? 1 : 0;
+      await updateRow(env, "ideas", id, pick(b, ["title", "description", "link", "area_id", "category", "stage", "impact", "effort", "decision_note", "admin_only"]));
       return json({ ok: true });
     }
     if (method === "DELETE" && id) {
