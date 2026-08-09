@@ -369,12 +369,18 @@ async function api(request, env, path) {
     }
     if (method === "POST" && !id) {
       const b = await body(request);
-      if (!b.title || !b.title.trim()) return err("Give the idea a title.");
+      // A title is optional as long as there's something else — a note, a
+      // link, or a photo. Blank titles fall back to a friendly placeholder.
+      const title = (b.title || "").trim();
+      const hasPhoto = (Array.isArray(b.images) && b.images.length) || b.thumb;
+      const link = normalizeUrl(b.link);
+      if (!title && !(b.description && b.description.trim()) && !link && !hasPhoto) return err("Add a photo, a link, or a note.");
+      const finalTitle = title || (hasPhoto ? "Photo idea" : link ? "Shared link" : "Untitled idea");
       // Only an admin/approver may file an idea as host-only.
       const adminOnly = b.admin_only && (await isApprover(request, env)) ? 1 : 0;
       const r = await env.DB.prepare(
         `INSERT INTO ideas (title, description, link, submitter_name, submitter_person_id, area_id, category, thumb, admin_only) VALUES (?,?,?,?,?,?,?,?,?)`
-      ).bind(b.title.trim(), b.description || null, normalizeUrl(b.link), b.submitter_name || null, b.submitter_person_id || null, b.area_id || null, b.category || null, b.thumb || null, adminOnly).run();
+      ).bind(finalTitle, b.description || null, link, b.submitter_name || null, b.submitter_person_id || null, b.area_id || null, b.category || null, b.thumb || null, adminOnly).run();
       const ideaId = r.meta.last_row_id;
       if (Array.isArray(b.images)) { for (const img of b.images.slice(0, 6)) { if (typeof img === "string" && img.length < 900000) await env.DB.prepare("INSERT INTO idea_images (idea_id, data) VALUES (?,?)").bind(ideaId, img).run(); } }
       return json({ id: ideaId }, 201);

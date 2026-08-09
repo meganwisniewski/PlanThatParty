@@ -816,15 +816,17 @@ function openIdeaModal(personId, personName, onDone) {
   const hasAreas = areasSrc.length > 0;
   const canFlag = (!!getPin() && !!state.data) || !!window.__approverToken; // host or approver
   modal(`<h3>Share an idea</h3><p class="hint">A suggestion for the party — decor, food, a bit of theatre, anything. It enters the pipeline for review.</p>
-    <label class="field"><span>Idea</span><input id="iTitle" placeholder="One line — what's the idea?"/></label>
+    <label class="field"><span>Idea <span style="color:var(--faint);font-weight:400">(optional if you add a photo or link)</span></span><input id="iTitle" placeholder="One line — what's the idea?"/></label>
     <label class="field"><span>Details (optional)</span><textarea id="iDesc" rows="3" placeholder="Anything that helps explain it"></textarea></label>
     <label class="field"><span>Link (optional)</span><input id="iLink" type="url" inputmode="url" placeholder="Paste a URL — a build, product, or inspo photo"/></label>
     <label class="field"><span>Photos (optional)</span><input id="iPhotos" type="file" accept="image/*" multiple/><div id="iPrev" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"></div></label>
     <div class="field ${hasAreas ? "two" : ""}">${hasAreas ? `<label><span>Area (optional)</span><select id="iArea">${areaOpts}</select></label>` : ""}${personId ? "" : `<label><span>Your name (optional)</span><input id="iName" value="${esc(personName || "")}"/></label>`}</div>
     ${canFlag ? `<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;margin-top:2px"><input type="checkbox" id="iAdminOnly" style="width:auto"/> 🔒 Hosts only <span style="color:var(--faint);font-size:12px">— hidden from the public &amp; volunteer lists</span></label>` : ""}`,
     async () => {
-      const title = $("#iTitle").value.trim(); if (!title) throw new Error("Give it a one-line title");
-      await post("/api/ideas", { title, description: $("#iDesc").value.trim() || null, link: $("#iLink").value.trim() || null, area_id: ($("#iArea") ? $("#iArea").value : "") || null, submitter_person_id: personId || null, submitter_name: personId ? null : ($("#iName") ? $("#iName").value.trim() : null), thumb: photos[0] ? photos[0].thumb : null, images: photos.map((p) => p.full), admin_only: ($("#iAdminOnly") && $("#iAdminOnly").checked) ? 1 : 0 });
+      const title = $("#iTitle").value.trim();
+      const descV = $("#iDesc").value.trim(), linkV = $("#iLink").value.trim();
+      if (!title && !descV && !linkV && !photos.length) throw new Error("Add a photo, a link, or a note first");
+      await post("/api/ideas", { title: title || null, description: descV || null, link: linkV || null, area_id: ($("#iArea") ? $("#iArea").value : "") || null, submitter_person_id: personId || null, submitter_name: personId ? null : ($("#iName") ? $("#iName").value.trim() : null), thumb: photos[0] ? photos[0].thumb : null, images: photos.map((p) => p.full), admin_only: ($("#iAdminOnly") && $("#iAdminOnly").checked) ? 1 : 0 });
       toast("Idea shared 🎉"); if (onDone) onDone(); else await mountIdeas();
     });
   const box = document.body.lastElementChild;
