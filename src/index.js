@@ -157,6 +157,18 @@ function normalizeUrl(raw) {
   catch { return null; }
 }
 
+// Normalize tags to a clean, de-duped, lowercase CSV. Accepts a string or an
+// array; returns null when empty.
+function normalizeTags(raw) {
+  if (raw == null) return null;
+  const parts = (Array.isArray(raw) ? raw : String(raw).split(","))
+    .map((s) => String(s).trim().toLowerCase())
+    .filter(Boolean);
+  const seen = [];
+  for (const p of parts) if (!seen.includes(p)) seen.push(p);
+  return seen.length ? seen.join(",") : null;
+}
+
 // Only allow known columns through for a table (guards against bad keys).
 function pick(obj, allowed) {
   const out = {};
@@ -627,8 +639,8 @@ async function api(request, env, path) {
       const b = await body(request);
       if (!b.title) return err("Title required.");
       const r = await env.DB.prepare(
-        `INSERT INTO tasks (area_id, parent_id, title, description, status, priority, due_date, percent, links_field, assignee_id)
-         VALUES (?,?,?,?,?,?,?,?,?,?)`
+        `INSERT INTO tasks (area_id, parent_id, title, description, status, priority, due_date, percent, links_field, assignee_id, tags)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`
       )
         .bind(
           b.area_id || null,
@@ -640,18 +652,20 @@ async function api(request, env, path) {
           b.due_date || null,
           b.percent || 0,
           b.links_field || null,
-          b.assignee_id || null
+          b.assignee_id || null,
+          normalizeTags(b.tags)
         )
         .run();
       return json({ id: r.meta.last_row_id }, 201);
     }
     if (method === "PATCH" && id) {
       const b = await body(request);
+      if ("tags" in b) b.tags = normalizeTags(b.tags);
       await updateRow(
         env,
         "tasks",
         id,
-        pick(b, ["area_id", "parent_id", "title", "description", "status", "priority", "due_date", "percent", "links_field", "assignee_id"])
+        pick(b, ["area_id", "parent_id", "title", "description", "status", "priority", "due_date", "percent", "links_field", "assignee_id", "tags"])
       );
       return json({ ok: true });
     }

@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   ext_id      TEXT,                          -- stable id from an imported plan (e.g. "t4.7")
   effort_hours REAL,                         -- estimated hours
   core        INTEGER DEFAULT 0,             -- load-bearing task flag
+  tags        TEXT,                          -- free-form CSV tags (e.g. "vendor sourcing")
   assignee_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
   created_at  TEXT DEFAULT (datetime('now'))
 );

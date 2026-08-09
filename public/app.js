@@ -190,9 +190,11 @@ function displayPct(t) {
   if (t.status === "done") return 100;
   return t.percent || 0;
 }
+const taskTags = (t) => String((t && t.tags) || "").split(",").map((s) => s.trim()).filter(Boolean);
 function matchesFilter(t) {
   const f = state.filter;
   if (f.q) { const q = f.q.toLowerCase(); if (!((t.title || "").toLowerCase().includes(q) || (t.description || "").toLowerCase().includes(q))) return false; }
+  if (f.tag) return taskTags(t).includes(f.tag);
   if (f.areaId) return t.area_id == f.areaId;
   if (f.saved === "unassigned") return !t.assignee_id && t.status !== "done";
   if (f.saved === "blocked") return t.status === "blocked";
@@ -314,7 +316,7 @@ function gridView() {
   let n = 0;
   const groups = areas.map((a) => {
     const rows = areaOrderedRows(a.id);
-    if (!rows.length && (state.filter.saved || state.filter.q)) return "";
+    if (!rows.length && (state.filter.saved || state.filter.q || state.filter.tag)) return "";
     const done = rows.filter((r) => r.t.status === "done").length;
     const pct = rows.length ? Math.round((done / rows.length) * 100) : 0;
     const shown = state.showDone ? rows : rows.filter((r) => r.t.status !== "done");
@@ -326,8 +328,9 @@ function gridView() {
       : `<tr><td colspan="7"><div class="empty"><div>No tasks in ${esc(a.name)} yet.</div><button class="btn small" data-add-task data-area="${a.id}">+ Add one</button></div></td></tr>`);
     return `<tr class="grouphdr"><td colspan="7"><button class="gh" data-collapse="${a.id}"><span class="tri">${collapsed ? "▶" : "▼"}</span><span style="width:10px;height:10px;border-radius:3px;background:${areaColor(a)};display:inline-block"></span> ${a.emoji || ""} ${esc(a.name).toUpperCase()} <span class="gcount">${rows.length}</span><span class="growbar"><span class="mini-track"><div style="width:${pct}%"></div></span> <span class="gcount">${pct}%</span></span></button></td></tr>${body}`;
   }).join("");
-  if (!groups.trim()) return `<div class="grid-wrap"><div class="empty"><div class="big">Nothing matches this filter.</div><button class="btn" data-saved-clear>Show all tasks</button></div></div>`;
-  return `<div class="grid-wrap"><table class="gt">
+  const tagBanner = state.filter.tag ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px"><span class="chip">🏷️ ${esc(state.filter.tag)}</span><span class="meta">Filtered to this tag</span><button class="btn small ghost" data-saved-clear>Clear</button></div>` : "";
+  if (!groups.trim()) return `<div class="grid-wrap">${tagBanner}<div class="empty"><div class="big">Nothing matches this filter.</div><button class="btn" data-saved-clear>Show all tasks</button></div></div>`;
+  return `<div class="grid-wrap">${tagBanner}<table class="gt">
     <thead><tr><th class="c-num">#</th><th>Task</th><th class="c-owner">Owner</th><th class="c-status">Status</th><th class="c-prio">Prio</th><th class="c-due">Due</th><th class="c-pct">%</th></tr></thead>
     <tbody>${groups}</tbody></table></div>`;
 }
@@ -343,6 +346,7 @@ function taskRow(t, n, depth) {
       <span class="tt ${t.status === "done" ? "done" : ""}">${esc(t.title)}</span>
       ${t.links_field ? `<span class="fact-badge">🔗 ${esc((FACT_META[t.links_field] || {}).label || "fact")}</span>` : ""}
       ${kids ? `<span class="subcount">${childrenOf(t.id).filter((k) => k.status === "done").length}/${kids}</span>` : ""}
+      ${taskTags(t).map((tg) => `<span class="chip" style="font-size:11px;padding:1px 7px">🏷️ ${esc(tg)}</span>`).join("")}
     </div></td>
     <td class="c-owner">${ownerSelect(t)}</td>
     <td class="c-status">${statusSelect(t)}</td>
@@ -548,6 +552,8 @@ function panel() {
         <label><span>Due</span><input id="pDue" type="date" value="${esc(t.due_date || "")}"/></label>
         <label><span>% complete</span><input id="pPct" type="number" min="0" max="100" value="${t.percent || 0}"/></label>
       </div>
+      <label class="field"><span>Tags <span style="color:var(--faint);font-weight:400">(comma-separated)</span></span><input id="pTags" value="${esc(t.tags || "")}" placeholder="e.g. vendor sourcing"/></label>
+      ${taskTags(t).length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin:-4px 0 8px">${taskTags(t).map((tg) => `<button class="chip" data-tagfilter="${esc(tg)}" style="cursor:pointer" title="Show all tasks tagged ${esc(tg)}">🏷️ ${esc(tg)}</button>`).join("")}</div>` : ""}
       <div class="subtasks">
         <div class="sh">Subtasks ${kids.length ? `(${kids.filter((k) => k.status === "done").length}/${kids.length})` : ""}</div>
         ${kids.map((k) => `<div class="subrow"><input type="checkbox" data-subcheck="${k.id}" ${k.status === "done" ? "checked" : ""}/><span class="sname ${k.status === "done" ? "done" : ""}" data-open="${k.id}">${esc(k.title)}</span><button class="btn ghost small danger" data-subdel="${k.id}">✕</button></div>`).join("")}
@@ -773,6 +779,8 @@ function wirePanel() {
   const bind = (sel, field, transform) => { const el = $(sel); if (el) el.onchange = () => commit(field, transform ? transform(el.value) : (el.value || null)); };
   bind("#pTitle", "title"); bind("#pDesc", "description"); bind("#pArea", "area_id", (v) => v || null); bind("#pOwner", "assignee_id", (v) => v || null);
   bind("#pStatus", "status"); bind("#pPrio", "priority"); bind("#pDue", "due_date", (v) => v || null); bind("#pPct", "percent", (v) => Number(v) || 0);
+  bind("#pTags", "tags", (v) => v.trim() || null);
+  appEl.querySelectorAll("[data-tagfilter]").forEach((b) => (b.onclick = () => { state.panelOpen = false; state.screen = "work"; state.dial = 1; state.filter = { areaId: null, saved: null, tag: b.dataset.tagfilter, q: "" }; render(); }));
   const ff = $("[data-fulfill]"); if (ff) ff.onclick = async () => { await post("/api/tasks/" + ff.dataset.fulfill + "/fulfill", { value: $("#factInput").value }); await refresh(); render(); toast("Saved ✓ — it's now everywhere"); };
   const dt = $("[data-deltask]"); if (dt) dt.onclick = async () => { if (!confirm("Delete this task?")) return; await del("/api/tasks/" + dt.dataset.deltask); state.panelOpen = false; state.selectedTaskId = null; await refresh(); render(); };
   const addsub = $("[data-addsub]"); if (addsub) addsub.onclick = async () => { const v = $("#newSub").value.trim(); if (!v) return; const t = tasksAll().find((x) => x.id === state.selectedTaskId); await post("/api/tasks", { title: v, parent_id: t.id, area_id: t.area_id }); await refresh(); render(); };
@@ -810,9 +818,10 @@ function openTaskModal(id, presetArea) {
     <label class="field"><span>Title</span><input id="mTitle" value="${esc(t.title || "")}" placeholder="What needs doing?"/></label>
     <label class="field"><span>Details</span><textarea id="mDesc" rows="2">${esc(t.description || "")}</textarea></label>
     <div class="field two"><label><span>Area</span><select id="mArea">${areaOpts}</select></label><label><span>Owner</span><select id="mOwner">${ownerOpts}</select></label></div>
-    <div class="field two"><label><span>Priority</span><select id="mPrio"><option value="normal">Med</option><option value="high" ${t.priority === "high" ? "selected" : ""}>High</option><option value="low" ${t.priority === "low" ? "selected" : ""}>Low</option></select></label><label><span>Due</span><input id="mDue" type="date" value="${esc(t.due_date || "")}"/></label></div>`,
+    <div class="field two"><label><span>Priority</span><select id="mPrio"><option value="normal">Med</option><option value="high" ${t.priority === "high" ? "selected" : ""}>High</option><option value="low" ${t.priority === "low" ? "selected" : ""}>Low</option></select></label><label><span>Due</span><input id="mDue" type="date" value="${esc(t.due_date || "")}"/></label></div>
+    <label class="field"><span>Tags <span style="color:var(--faint);font-weight:400">(comma-separated)</span></span><input id="mTags" value="${esc(t.tags || "")}" placeholder="e.g. vendor sourcing, diy"/></label>`,
     async () => {
-      const payload = { title: $("#mTitle").value.trim(), description: $("#mDesc").value.trim() || null, area_id: $("#mArea").value || null, assignee_id: $("#mOwner").value || null, priority: $("#mPrio").value, due_date: $("#mDue").value || null };
+      const payload = { title: $("#mTitle").value.trim(), description: $("#mDesc").value.trim() || null, area_id: $("#mArea").value || null, assignee_id: $("#mOwner").value || null, priority: $("#mPrio").value, due_date: $("#mDue").value || null, tags: $("#mTags").value.trim() || null };
       if (!payload.title) return toast("Add a title");
       if (id) await patch("/api/tasks/" + id, payload); else await post("/api/tasks", payload);
       await refresh(); render(); toast("Saved");
