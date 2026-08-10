@@ -736,7 +736,17 @@ export default {
         return err("Server error: " + (e && e.message), 500);
       }
     }
-    // Static SPA (with SPA fallback configured in wrangler.toml)
-    return env.ASSETS.fetch(request);
+    // Static SPA (with SPA fallback configured in wrangler.toml).
+    const res = await env.ASSETS.fetch(request);
+    // Force the HTML document and the app's JS/CSS to revalidate on every
+    // load (cheap 304s via ETag). Without this, phones keep serving a cached
+    // app.js/styles.css after a deploy and appear "stuck" on the old version.
+    const ct = res.headers.get("content-type") || "";
+    if (ct.includes("text/html") || url.pathname.endsWith("app.js") || url.pathname.endsWith("styles.css")) {
+      const r = new Response(res.body, res);
+      r.headers.set("Cache-Control", "no-cache, must-revalidate");
+      return r;
+    }
+    return res;
   },
 };
