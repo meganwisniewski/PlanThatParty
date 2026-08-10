@@ -655,8 +655,40 @@ function personCard(p) {
     <div class="chan">Prefers <b>${channelLabel(p.preferred_channel)}</b>${p.platform ? ` · ${esc(PLATFORMS[p.platform] || p.platform)}` : ""}</div>
     <div style="font-size:13px;color:var(--muted)">${p.email ? `📧 ${esc(p.email)}<br>` : ""}${p.phone ? `📱 ${esc(p.phone)}<br>` : ""}${p.channel_notes ? `📝 ${esc(p.channel_notes)}` : ""}</div>
     <div style="margin-top:10px"><span class="chip">${n} task${n === 1 ? "" : "s"}</span></div>
-    <div style="display:flex;gap:6px;margin-top:12px"><button class="btn small" data-copy="${esc(p.share_token)}">🔗 Copy link</button><button class="btn ghost small danger" data-del-person="${p.id}">Remove</button></div>
+    <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap"><button class="btn small" data-copy="${esc(p.share_token)}">🔗 Copy link</button><button class="btn ghost small" data-vcard="${p.id}" title="Save to your phone's contacts (iPhone & Android)">👤 Add to contacts</button><button class="btn ghost small danger" data-del-person="${p.id}">Remove</button></div>
   </div>`;
+}
+
+// Build a vCard (.vcf). Tapping the downloaded file opens the native
+// "Add to Contacts" screen on both iOS and Android.
+function personVCard(p) {
+  const clean = (s) => String(s || "").replace(/[\\;,]/g, (c) => "\\" + c).replace(/\n/g, "\\n");
+  const name = (p.name || "").trim();
+  const parts = name.split(/\s+/);
+  const last = parts.length > 1 ? parts.pop() : "";
+  const first = parts.join(" ");
+  const org = (state.data.party && state.data.party.name) || "The party";
+  const lines = ["BEGIN:VCARD", "VERSION:3.0", `N:${clean(last)};${clean(first)};;;`, `FN:${clean(name)}`, `ORG:${clean(org)}`];
+  if (p.role && p.role !== "volunteer") lines.push(`TITLE:${clean(p.role)}`);
+  if (p.phone) lines.push(`TEL;TYPE=CELL:${clean(p.phone)}`);
+  if (p.email) lines.push(`EMAIL;TYPE=INTERNET:${clean(p.email)}`);
+  if (p.channel_notes) lines.push(`NOTE:${clean(p.channel_notes)}`);
+  lines.push("END:VCARD");
+  return lines.join("\r\n");
+}
+function downloadVCard(id) {
+  const p = (state.data.people || []).find((x) => x.id == id);
+  if (!p) return;
+  const blob = new Blob([personVCard(p)], { type: "text/vcard;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${(p.name || "contact").replace(/[^a-z0-9]+/gi, "-")}.vcf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast("Opening contact card…");
 }
 
 /* ---------------- SETTINGS ---------------- */
@@ -754,6 +786,7 @@ function wireCanvas() {
   appEl.querySelectorAll("[data-edit-person]").forEach((b) => (b.onclick = () => openPersonModal(Number(b.dataset.editPerson))));
   appEl.querySelectorAll("[data-del-person]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this person?")) return; await del("/api/people/" + b.dataset.delPerson); await refresh(); render(); }));
   appEl.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = () => { const url = location.origin + "/me/" + b.dataset.copy; navigator.clipboard.writeText(url).then(() => toast("Link copied")).catch(() => prompt("Copy:", url)); }));
+  appEl.querySelectorAll("[data-vcard]").forEach((b) => (b.onclick = () => downloadVCard(b.dataset.vcard)));
   // guests
   const agb = $("[data-add-guest]"); if (agb) { const addG = async () => { const name = $("#gName").value.trim(); if (!name) return; const plus = $("#gPlus").value ? Number($("#gPlus").value) : 0; await post("/api/guests", { name, plus_count: plus }); await refresh(); render(); }; agb.onclick = addG; const gn = $("#gName"); if (gn) gn.onkeydown = (e) => { if (e.key === "Enter") addG(); }; }
   appEl.querySelectorAll("[data-gname]").forEach((i) => (i.onchange = async () => { await patch("/api/guests/" + i.dataset.gname, { name: i.value.trim() || "(unnamed)" }); }));
