@@ -788,6 +788,18 @@ function wirePanel() {
   appEl.querySelectorAll("[data-subdel]").forEach((b) => (b.onclick = async () => { await del("/api/tasks/" + b.dataset.subdel); await refresh(); render(); }));
 }
 
+/* ---------------- lightbox (full-screen image) ---------------- */
+function openLightbox(src) {
+  const back = document.createElement("div");
+  Object.assign(back.style, { position: "fixed", inset: "0", zIndex: "100000", background: "rgba(0,0,0,0.86)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "zoom-out", padding: "24px" });
+  back.innerHTML = `<img src="${src}" style="max-width:96vw;max-height:92vh;border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,0.5)"/><button aria-label="Close" style="position:fixed;top:14px;right:18px;background:rgba(255,255,255,0.15);color:#fff;border:none;border-radius:50%;width:38px;height:38px;font-size:20px;cursor:pointer">✕</button>`;
+  const close = () => { back.remove(); document.removeEventListener("keydown", key); };
+  const key = (e) => { if (e.key === "Escape") close(); };
+  back.onclick = close;
+  document.addEventListener("keydown", key);
+  document.body.appendChild(back);
+}
+
 /* ---------------- modals ---------------- */
 function modal(inner, onSave) {
   const back = document.createElement("div"); back.className = "modal-back";
@@ -966,7 +978,7 @@ async function openIdeaDetail(id) {
       ${i.area_emoji ? `<span class="chip">${i.area_emoji} ${esc(i.area_name || "")}</span>` : ""}
       <span style="color:var(--muted);font-size:12px">by ${esc(i.submitter_person_name || i.submitter_name || "Anonymous")}</span>
     </div>
-    ${images.length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${images.map((im) => `<img src="${im.data}" style="max-width:150px;max-height:150px;border-radius:8px;border:1px solid var(--line)"/>`).join("")}</div>` : ""}
+    ${images.length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${images.map((im) => `<img src="${im.data}" data-zoom="${im.data}" style="max-width:150px;max-height:150px;border-radius:8px;border:1px solid var(--line);cursor:zoom-in"/>`).join("")}</div>` : ""}
     ${admin ? `<div class="fact-box" style="background:var(--surface-2);border-color:var(--line)">
       <div class="field two"><label><span>Stage</span><select id="dStage">${IDEA_STAGES.map((s) => `<option value="${s}" ${i.stage === s ? "selected" : ""}>${IS_EMOJI[s]} ${IS_LABEL[s]}</option>`).join("")}</select></label><label><span>Area</span><select id="dArea">${areaOpts}</select></label></div>
       <div class="field two"><label><span>Impact (1-5)</span><input id="dImpact" type="number" min="1" max="5" value="${i.impact || ""}"/></label><label><span>Effort (1-5)</span><input id="dEffort" type="number" min="1" max="5" value="${i.effort || ""}"/></label></div>
@@ -985,6 +997,7 @@ async function openIdeaDetail(id) {
     null);
   const box = document.body.lastElementChild;
   const q = (s) => box.querySelector(s);
+  box.querySelectorAll("[data-zoom]").forEach((im) => (im.onclick = () => openLightbox(im.dataset.zoom)));
   q("#dVote").onclick = async () => { const r = await doVote(id); q("#dVote").textContent = `👍 ${r.votes}`; };
   q("#dCommentBtn").onclick = async () => { const v = q("#dComment").value.trim(); if (!v) return; await post(`/api/ideas/${id}/comment`, { body: v, author_name: fab.dataset.name || null, author_person_id: fab.dataset.person || null }); box.remove(); ideasData = await get("/api/ideas").catch(() => ideasData); if ($("#ideasmount")) drawIdeas(); else if ($("#pubIdeas")) mountPublicIdeas(); else if ($("#volIdeas")) mountVolIdeas(); openIdeaDetail(id); };
   if (admin) {
