@@ -35,14 +35,19 @@ async function requireAdmin(request, env) {
   return err("Wrong or missing admin PIN.", 401);
 }
 
+// Hosts and co-hosts always carry host-level (approver) permissions — the
+// role grants it, so no one has to remember to tick a box.
+const HOST_ROLES = ["host", "co-host"];
+const hostRole = (role) => HOST_ROLES.includes(String(role || "").toLowerCase());
+
 // Idea moderation is allowed for the admin PIN OR any approver's share token.
 async function requireApprover(request, env) {
   const gate = await requireAdmin(request, env);
   if (!gate) return null;
   const tok = request.headers.get("x-approver-token");
   if (tok) {
-    const p = await env.DB.prepare("SELECT is_approver FROM people WHERE share_token = ?").bind(tok).first();
-    if (p && p.is_approver) return null;
+    const p = await env.DB.prepare("SELECT is_approver, role FROM people WHERE share_token = ?").bind(tok).first();
+    if (p && (p.is_approver || hostRole(p.role))) return null;
   }
   return gate;
 }
@@ -223,7 +228,7 @@ async function api(request, env, path) {
       ).results;
       const pc = partyClient(party);
       return json({
-        person: { id: person.id, name: person.name, role: person.role, is_approver: person.is_approver || 0, reminder_minutes: person.reminder_minutes || "" },
+        person: { id: person.id, name: person.name, role: person.role, is_approver: (person.is_approver || hostRole(person.role)) ? 1 : 0, reminder_minutes: person.reminder_minutes || "" },
         party: party
           ? { name: pc.name, event_date: pc.event_date, start_time: pc.start_time, location: pc.location, notes: pc.notes, calStart: pc.calStart, calEnd: pc.calEnd, calAllDay: pc.calAllDay }
           : null,
@@ -586,9 +591,10 @@ async function api(request, env, path) {
       const b = await body(request);
       if (!b.name) return err("Name required.");
       const token = newToken();
+      const role = b.role || "volunteer";
       const r = await env.DB.prepare(
-        `INSERT INTO people (name, email, phone, preferred_channel, platform, channel_notes, role, share_token)
-         VALUES (?,?,?,?,?,?,?,?)`
+        `INSERT INTO people (name, email, phone, preferred_channel, platform, channel_notes, role, is_approver, share_token)
+         VALUES (?,?,?,?,?,?,?,?,?)`
       )
         .bind(
           b.name,
@@ -597,7 +603,8 @@ async function api(request, env, path) {
           b.preferred_channel || "email",
           b.platform || null,
           b.channel_notes || null,
-          b.role || "volunteer",
+          role,
+          hostRole(role) || b.is_approver ? 1 : 0,
           token
         )
         .run();
@@ -605,6 +612,8 @@ async function api(request, env, path) {
     }
     if (method === "PATCH" && id) {
       const b = await body(request);
+      // A host/co-host is always an approver — the role implies it.
+      if ("role" in b && hostRole(b.role)) b.is_approver = 1;
       await updateRow(
         env,
         "people",
