@@ -273,7 +273,7 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .fab { position: fixed; right: 18px; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); z-index: 50; background: var(--accent-purple); color: #fff; border: none; border-radius: 999px; padding: 11px 17px; font-weight: 700; cursor: pointer; box-shadow: var(--shadow-panel); }
 .fab:hover { filter: brightness(1.08); }
 .modal-back { position: fixed; inset: 0; background: rgba(20, 16, 30, 0.4); z-index: 60; display: flex; align-items: center; justify-content: center; padding: 16px; }
-.modal { background: var(--surface); border-radius: 16px; width: 100%; max-width: 440px; padding: 22px; box-shadow: var(--shadow-panel); max-height: 90vh; overflow-y: auto; }
+.modal { background: var(--surface); border-radius: 16px; width: 100%; max-width: 440px; padding: 22px; box-shadow: var(--shadow-panel); max-height: 90vh; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 .modal h3 { margin: 0 0 4px; }
 .modal .hint { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
 .sentiments { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -316,6 +316,10 @@ button, select, input, textarea { font: inherit; color: inherit; }
   .gt td.c-num { display: none; }
   .board { flex-direction: column; }
   .board-col { width: 100%; }
+  /* Modals become bottom sheets: full width, tall, and reliably scrollable
+     so the Save/Cancel controls at the bottom are always reachable. */
+  .modal-back { padding: 0; align-items: flex-end; }
+  .modal { max-width: none; width: 100%; max-height: 92vh; border-radius: 16px 16px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom, 0px)); }
 }
 
 /* Touch-friendly sizing on phones / small screens. */
