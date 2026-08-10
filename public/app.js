@@ -205,7 +205,9 @@ function matchesFilter(t) {
 // Which host is signed in on this device (for comment / feedback attribution).
 // Stored per-device so a host is remembered between visits.
 function getHostId() { try { return localStorage.getItem("hostPersonId") || ""; } catch { return ""; } }
-function hostPeople() { return ((state.data && state.data.people) || []).filter((p) => ["host", "co-host"].includes(String(p.role || "").toLowerCase())); }
+// The planning team who can post as themselves: anyone with admin access
+// (approvers) plus hosts/co-hosts/PM roles — i.e. everyone but plain volunteers.
+function hostPeople() { return ((state.data && state.data.people) || []).filter((p) => p.is_approver || ["host", "co-host", "pm"].includes(String(p.role || "").toLowerCase())); }
 // Planning-areas nav section folds up; folded by default until the host opens it.
 function areasFolded() { try { const v = localStorage.getItem("areasFolded"); return v === null ? true : v === "1"; } catch { return true; } }
 function setAreasFolded(f) { try { localStorage.setItem("areasFolded", f ? "1" : "0"); } catch {} }
