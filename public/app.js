@@ -118,7 +118,7 @@ function route() {
 // else gets the guest page — public info only (currently just date & time).
 async function renderRoot() {
   if (getPin()) {
-    try { state.data = await get("/api/state"); fab.hidden = false; fab.dataset.person = ""; render(); return; }
+    try { state.data = await get("/api/state"); fab.hidden = false; applyHostIdentity(); render(); return; }
     catch (e) { if (e.status === 401) clearPin(); else { appEl.innerHTML = `<div class="boot">Couldn't load: ${esc(e.message)}</div>`; return; } }
   }
   return renderGuest();
@@ -202,6 +202,22 @@ function matchesFilter(t) {
   return true;
 }
 
+// Which host is signed in on this device (for comment / feedback attribution).
+// Stored per-device so a host is remembered between visits.
+function getHostId() { try { return localStorage.getItem("hostPersonId") || ""; } catch { return ""; } }
+function hostPeople() { return ((state.data && state.data.people) || []).filter((p) => ["host", "co-host"].includes(String(p.role || "").toLowerCase())); }
+// Point fab.dataset (used as the comment/feedback author) at the stored host.
+function applyHostIdentity() {
+  const id = getHostId();
+  const p = ((state.data && state.data.people) || []).find((x) => String(x.id) === String(id));
+  fab.dataset.person = p ? String(p.id) : "";
+  fab.dataset.name = p ? p.name : "";
+}
+function setHostIdentity(id) {
+  try { id ? localStorage.setItem("hostPersonId", String(id)) : localStorage.removeItem("hostPersonId"); } catch {}
+  applyHostIdentity();
+}
+
 function render() {
   const scrollY = ($(".canvas") || {}).scrollTop || 0;
   const d = state.data;
@@ -254,6 +270,7 @@ function sidebar() {
       <button class="nav-item ${state.screen === "ideas" ? "active" : ""}" data-screen="ideas"><span class="emoji">💡</span> Ideas${d.newIdeas ? ` <span class="count">${d.newIdeas}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "feedback" ? "active" : ""}" data-screen="feedback"><span class="emoji">💬</span> Feedback${d.newFeedback ? ` <span class="count">${d.newFeedback}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "settings" ? "active" : ""}" data-screen="settings"><span class="emoji">⚙️</span> Settings</button>
+      ${(() => { const hosts = hostPeople(); if (!hosts.length) return ""; const cur = getHostId(); return `<div style="padding:8px 12px 4px"><label style="display:block;font-size:11px;color:var(--faint);margin-bottom:4px">💬 I'm posting as</label><select data-whoami style="width:100%;padding:7px 8px;border:1px solid var(--line-strong);border-radius:8px;font-size:13px;background:var(--bg)"><option value="">— pick your name —</option>${hosts.map((p) => `<option value="${p.id}" ${String(p.id) === cur ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></div>`; })()}
       <button class="nav-item" data-logout><span class="emoji">🔒</span> Log out (host)</button>
     </div>
   </nav>`;
@@ -747,6 +764,7 @@ function wire() {
   const ov = $("[data-overview]"); if (ov) ov.onclick = () => { state.screen = "work"; state.dial = 0; state.filter = { areaId: null, saved: null, q: "" }; state.navOpen = false; render(); };
   appEl.querySelectorAll("[data-screen]").forEach((b) => (b.onclick = () => { state.screen = b.dataset.screen; state.navOpen = false; render(); if (state.screen === "feedback") mountFeedback(); if (state.screen === "ideas") mountIdeas(); }));
   const lo = $("[data-logout]"); if (lo) lo.onclick = () => { clearPin(); state.data = null; state.navOpen = false; renderGuest(); };
+  const who = $("[data-whoami]"); if (who) who.onchange = () => { setHostIdentity(who.value); toast(who.value ? `Posting as ${who.options[who.selectedIndex].text}` : "Name cleared"); };
   const sc = $("[data-saved-clear]"); if (sc) sc.onclick = () => { state.filter = { areaId: null, saved: null, q: "" }; render(); };
   const nt = $("[data-navtoggle]"); if (nt) nt.onclick = () => { state.navOpen = !state.navOpen; render(); };
 
