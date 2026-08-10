@@ -294,12 +294,14 @@ button, select, input, textarea { font: inherit; color: inherit; }
 @media (max-width: 1000px) {
   .shell, .shell.panel-open { grid-template-columns: 1fr; }
   .nav { position: fixed; left: 0; top: 0; bottom: 0; width: 260px; z-index: 40; transform: translateX(-100%); transition: transform .2s; }
-  .nav.open { transform: none; }
+  .nav.open { transform: none; box-shadow: 0 0 40px rgba(0,0,0,.25); }
+  .nav-backdrop { display: block; position: fixed; inset: 0; z-index: 39; background: rgba(0,0,0,.38); }
   .panel { position: fixed; right: 0; top: 0; bottom: 0; width: min(420px, 92vw); z-index: 45; }
   .navtoggle { display: inline-flex !important; }
   .twocol { grid-template-columns: 1fr; }
 }
 .navtoggle { display: none; }
+.nav-backdrop { display: none; }
 
 @media (max-width: 640px) {
   .canvas { padding: 12px; }

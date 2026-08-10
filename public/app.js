@@ -230,6 +230,7 @@ function render() {
   const cd = countdown(party.event_date);
   appEl.innerHTML = `
     <div class="shell ${state.panelOpen ? "panel-open" : ""}">
+      ${state.navOpen ? `<div class="nav-backdrop" data-navclose></div>` : ""}
       ${sidebar()}
       <div class="main">
         ${topbar(party, cd)}
@@ -773,6 +774,7 @@ function wire() {
   const who = $("[data-whoami]"); if (who) who.onchange = () => { setHostIdentity(who.value); toast(who.value ? `Posting as ${who.options[who.selectedIndex].text}` : "Name cleared"); };
   const sc = $("[data-saved-clear]"); if (sc) sc.onclick = () => { state.filter = { areaId: null, saved: null, q: "" }; render(); };
   const nt = $("[data-navtoggle]"); if (nt) nt.onclick = () => { state.navOpen = !state.navOpen; render(); };
+  const nbc = $("[data-navclose]"); if (nbc) nbc.onclick = () => { state.navOpen = false; render(); };
   const fa = $("[data-fold-areas]"); if (fa) fa.onclick = () => { setAreasFolded(!areasFolded()); render(); };
 
   // topbar
