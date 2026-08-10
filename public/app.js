@@ -73,6 +73,8 @@ const IS_EMOJI = { submitted: "💡", screening: "🔍", approved: "✅", promot
 const IS_COLOR = { submitted: "#b45309", screening: "#1d4ed8", approved: "#15803d", promoted: "#7c3aed", declined: "#b42318", parked: "#5c6470" };
 function voterKey() { let k = localStorage.getItem("ptp_voter"); if (!k) { k = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)); localStorage.setItem("ptp_voter", k); } return k; }
 let ideasData = [];
+let ideasLoaded = false; // have we fetched ideas at least once (so render can redraw from cache)?
+let fbData = null;       // cached feedback list, so a re-render doesn't wipe it back to "Loading…"
 // Shrink an image file to a data URL — keeps photos small enough to store inline.
 function resizeImage(file, maxDim, quality) {
   return new Promise((resolve, reject) => {
@@ -239,6 +241,12 @@ function render() {
       ${state.panelOpen ? `<aside class="panel">${panel()}</aside>` : ""}
     </div>`;
   wire();
+  // The Ideas & Feedback canvases are filled asynchronously. render() only lays
+  // down their "Loading…" placeholder, so after every re-render (e.g. opening or
+  // closing the mobile nav) we must repopulate them — from cache when we already
+  // have the data (no re-fetch flash) — or they'd stay stuck on "Loading…".
+  if (state.screen === "ideas") { if (ideasLoaded) drawIdeas(); else mountIdeas(); }
+  else if (state.screen === "feedback") { if (fbData) drawFeedback(); else mountFeedback(); }
   const c = $(".canvas"); if (c) c.scrollTop = scrollY;
 }
 
@@ -769,7 +777,7 @@ function wire() {
   appEl.querySelectorAll("[data-area]").forEach((b) => (b.onclick = () => { state.screen = "work"; state.dial = 1; state.filter = { areaId: Number(b.dataset.area), saved: null, q: state.filter.q }; state.navOpen = false; render(); }));
   appEl.querySelectorAll("[data-saved]").forEach((b) => (b.onclick = () => { state.screen = "work"; state.dial = 1; state.filter = { areaId: null, saved: b.dataset.saved || null, q: state.filter.q }; state.navOpen = false; render(); }));
   const ov = $("[data-overview]"); if (ov) ov.onclick = () => { state.screen = "work"; state.dial = 0; state.filter = { areaId: null, saved: null, q: "" }; state.navOpen = false; render(); };
-  appEl.querySelectorAll("[data-screen]").forEach((b) => (b.onclick = () => { state.screen = b.dataset.screen; state.navOpen = false; render(); if (state.screen === "feedback") mountFeedback(); if (state.screen === "ideas") mountIdeas(); }));
+  appEl.querySelectorAll("[data-screen]").forEach((b) => (b.onclick = () => { state.screen = b.dataset.screen; state.navOpen = false; render(); }));
   const lo = $("[data-logout]"); if (lo) lo.onclick = () => { clearPin(); state.data = null; state.navOpen = false; renderGuest(); };
   const who = $("[data-whoami]"); if (who) who.onchange = () => { setHostIdentity(who.value); toast(who.value ? `Posting as ${who.options[who.selectedIndex].text}` : "Name cleared"); };
   const sc = $("[data-saved-clear]"); if (sc) sc.onclick = () => { state.filter = { areaId: null, saved: null, q: "" }; render(); };
@@ -962,7 +970,12 @@ function openPersonModal(id) {
 /* ---------------- feedback (admin triage) ---------------- */
 async function mountFeedback() {
   const mount = $("#fbmount"); if (!mount) return;
-  let items; try { items = await get("/api/feedback"); } catch (e) { mount.innerHTML = `<div class="empty">${esc(e.message)}${e.status === 401 ? ` — <button class="btn small" id="pinBtn">Enter PIN</button>` : ""}</div>`; const pb = $("#pinBtn"); if (pb) pb.onclick = askPin; return; }
+  try { fbData = await get("/api/feedback"); } catch (e) { mount.innerHTML = `<div class="empty">${esc(e.message)}${e.status === 401 ? ` — <button class="btn small" id="pinBtn">Enter PIN</button>` : ""}</div>`; const pb = $("#pinBtn"); if (pb) pb.onclick = askPin; return; }
+  drawFeedback();
+}
+function drawFeedback() {
+  const mount = $("#fbmount"); if (!mount || !fbData) return;
+  const items = fbData;
   const icon = { love: "❤️", idea: "💡", confusing: "😕", bug: "🐞" };
   mount.innerHTML = `<div class="section-title">What people are telling us (${items.length})</div>
     <div class="grid-wrap" style="padding:14px">${items.length ? items.map((f) => `<div class="fbrow"><div class="fm"><div>${icon[f.sentiment] || "💬"} ${esc(f.message)}</div>${f.target ? `<div class="meta" style="color:var(--accent-strong)">🎯 ${esc(f.target)}</div>` : ""}<div class="meta">${esc(f.person_name || f.author_name || "Anonymous")} · ${esc((f.created_at || "").replace("T", " ").slice(0, 16))} ${f.page ? `· ${esc(f.page)}` : ""}</div></div>
@@ -973,7 +986,7 @@ async function mountFeedback() {
 /* ---------------- ideas pipeline ---------------- */
 async function mountIdeas() {
   const mount = $("#ideasmount"); if (!mount) return;
-  try { ideasData = await get("/api/ideas"); } catch (e) { mount.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  try { ideasData = await get("/api/ideas"); ideasLoaded = true; } catch (e) { mount.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
   drawIdeas();
 }
 function drawIdeas() {
