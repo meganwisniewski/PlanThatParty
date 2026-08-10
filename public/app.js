@@ -858,6 +858,39 @@ function openLightbox(src) {
   document.body.appendChild(back);
 }
 
+/* ---------------- tag input (chips + type-to-add + suggestions) ---------------- */
+function tagChipsHtml(tags) {
+  const list = String(tags || "").split(",").map((s) => s.trim()).filter(Boolean);
+  return list.length ? `<span style="display:inline-flex;gap:4px;flex-wrap:wrap">${list.map((t) => `<span class="chip" style="background:var(--surface-2)">#${esc(t)}</span>`).join("")}</span>` : "";
+}
+// All tags used across existing ideas, for suggestions.
+function collectIdeaTags() {
+  const out = [];
+  (ideasData || []).forEach((i) => String(i.tags || "").split(",").map((s) => s.trim()).filter(Boolean).forEach((t) => { if (!out.includes(t)) out.push(t); }));
+  return out.sort();
+}
+// Turns an empty container into a live tag editor. Read the result with root._getTags().
+function mountTagInput(root, initial, suggestions) {
+  if (!root) return;
+  const norm = (s) => String(s).trim().toLowerCase().replace(/[,]/g, "");
+  let tags = (initial || []).map(norm).filter(Boolean);
+  const add = (raw, refocus) => { String(raw).split(",").map(norm).filter(Boolean).forEach((t) => { if (!tags.includes(t)) tags.push(t); }); draw(); if (refocus) { const el = root.querySelector("[data-taginput]"); if (el) el.focus(); } };
+  const draw = () => {
+    const sugg = (suggestions || []).filter((s) => !tags.includes(s));
+    root.innerHTML = `
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">${tags.length ? tags.map((t) => `<span class="chip" style="display:inline-flex;align-items:center;gap:4px;background:var(--surface-2)">#${esc(t)} <button type="button" data-rmtag="${esc(t)}" title="Remove" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px;line-height:1;padding:0">✕</button></span>`).join("") : `<span style="color:var(--faint);font-size:12px">No tags yet</span>`}</div>
+      <input data-taginput placeholder="Type a tag, press Enter…" style="width:100%;border:1px solid var(--line-strong);border-radius:8px;padding:8px"/>
+      ${sugg.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><span style="color:var(--faint);font-size:11px;align-self:center">Existing:</span>${sugg.slice(0, 14).map((s) => `<button type="button" data-addtag="${esc(s)}" class="chip" style="cursor:pointer;background:transparent;border:1px solid var(--line-strong)">+ ${esc(s)}</button>`).join("")}</div>` : ""}`;
+    const inp = root.querySelector("[data-taginput]");
+    inp.onkeydown = (e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(inp.value, true); inp.value = ""; } };
+    inp.onblur = () => { if (inp.value.trim()) { add(inp.value); inp.value = ""; } };
+    root.querySelectorAll("[data-addtag]").forEach((b) => (b.onclick = () => add(b.dataset.addtag, true)));
+    root.querySelectorAll("[data-rmtag]").forEach((b) => (b.onclick = () => { tags = tags.filter((t) => t !== b.dataset.rmtag); draw(); }));
+  };
+  root._getTags = () => tags.slice();
+  draw();
+}
+
 /* ---------------- modals ---------------- */
 function modal(inner, onSave) {
   const back = document.createElement("div"); back.className = "modal-back";
@@ -967,6 +1000,7 @@ function ideaCard(i) {
     ${i.thumb ? `<img src="${i.thumb}" style="width:100%;max-height:120px;object-fit:cover;border-radius:6px;margin-bottom:6px"/>` : ""}
     <div class="bt">${esc(i.title)}</div>
     <div class="brow">${i.area_emoji ? `<span>${i.area_emoji} ${esc(i.area_name || "")}</span>` : ""}<span>${esc(i.submitter_person_name || i.submitter_name || "Anon")}</span></div>
+    ${i.tags ? `<div style="margin-top:6px">${tagChipsHtml(i.tags)}</div>` : ""}
     <div class="brow" style="margin-top:6px">
       <button class="btn small ghost" data-vote="${i.id}">👍 ${i.votes || 0}</button>
       <span class="chip">💬 ${i.comments || 0}</span>
@@ -1001,15 +1035,18 @@ function openIdeaModal(personId, personName, onDone) {
     <label class="field"><span>Link (optional)</span><input id="iLink" type="url" inputmode="url" placeholder="Paste a URL — a build, product, or inspo photo"/></label>
     <label class="field"><span>Photos (optional)</span><input id="iPhotos" type="file" accept="image/*" multiple/><div id="iPrev" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"></div></label>
     <div class="field ${hasAreas ? "two" : ""}">${hasAreas ? `<label><span>Area (optional)</span><select id="iArea">${areaOpts}</select></label>` : ""}${personId ? "" : `<label><span>Your name (optional)</span><input id="iName" value="${esc(personName || "")}"/></label>`}</div>
+    <label class="field"><span>Tags (optional)</span><div id="iTags"></div></label>
     ${canFlag ? `<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;margin-top:2px"><input type="checkbox" id="iAdminOnly" style="width:auto"/> 🔒 Hosts only <span style="color:var(--faint);font-size:12px">— hidden from the public &amp; volunteer lists</span></label>` : ""}`,
     async () => {
       const title = $("#iTitle").value.trim();
       const descV = $("#iDesc").value.trim(), linkV = $("#iLink").value.trim();
       if (!title && !descV && !linkV && !photos.length) throw new Error("Add a photo, a link, or a note first");
-      await post("/api/ideas", { title: title || null, description: descV || null, link: linkV || null, area_id: ($("#iArea") ? $("#iArea").value : "") || null, submitter_person_id: personId || null, submitter_name: personId ? null : ($("#iName") ? $("#iName").value.trim() : null), thumb: photos[0] ? photos[0].thumb : null, images: photos.map((p) => p.full), admin_only: ($("#iAdminOnly") && $("#iAdminOnly").checked) ? 1 : 0 });
+      const tg = $("#iTags"); const tags = tg && tg._getTags ? tg._getTags() : [];
+      await post("/api/ideas", { title: title || null, description: descV || null, link: linkV || null, area_id: ($("#iArea") ? $("#iArea").value : "") || null, submitter_person_id: personId || null, submitter_name: personId ? null : ($("#iName") ? $("#iName").value.trim() : null), thumb: photos[0] ? photos[0].thumb : null, images: photos.map((p) => p.full), admin_only: ($("#iAdminOnly") && $("#iAdminOnly").checked) ? 1 : 0, tags });
       toast("Idea shared 🎉"); if (onDone) onDone(); else await mountIdeas();
     });
   const box = document.body.lastElementChild;
+  mountTagInput(box.querySelector("#iTags"), [], collectIdeaTags());
   const inp = box.querySelector("#iPhotos"), prev = box.querySelector("#iPrev");
   const renderPrev = () => { prev.innerHTML = photos.map((p, idx) => `<div style="position:relative"><img src="${p.thumb}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"/><button type="button" data-rmp="${idx}" style="position:absolute;top:-6px;right:-6px;background:#b42318;color:#fff;border:none;border-radius:50%;width:18px;height:18px;line-height:1;cursor:pointer;font-size:12px">×</button></div>`).join(""); prev.querySelectorAll("[data-rmp]").forEach((b) => (b.onclick = () => { photos.splice(Number(b.dataset.rmp), 1); renderPrev(); })); };
   if (inp) inp.onchange = async () => {
@@ -1036,12 +1073,14 @@ async function openIdeaDetail(id) {
       ${i.area_emoji ? `<span class="chip">${i.area_emoji} ${esc(i.area_name || "")}</span>` : ""}
       <span style="color:var(--muted);font-size:12px">by ${esc(i.submitter_person_name || i.submitter_name || "Anonymous")}</span>
     </div>
+    ${i.tags ? `<div style="margin-bottom:12px">${tagChipsHtml(i.tags)}</div>` : ""}
     ${images.length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${images.map((im) => `<img src="${im.data}" data-zoom="${im.data}" style="max-width:150px;max-height:150px;border-radius:8px;border:1px solid var(--line);cursor:zoom-in"/>`).join("")}</div>` : ""}
     ${admin ? `<div class="fact-box" style="background:var(--surface-2);border-color:var(--line)">
       <div class="field two"><label><span>Stage</span><select id="dStage">${IDEA_STAGES.map((s) => `<option value="${s}" ${i.stage === s ? "selected" : ""}>${IS_EMOJI[s]} ${IS_LABEL[s]}</option>`).join("")}</select></label><label><span>Area</span><select id="dArea">${areaOpts}</select></label></div>
       <div class="field two"><label><span>Impact (1-5)</span><input id="dImpact" type="number" min="1" max="5" value="${i.impact || ""}"/></label><label><span>Effort (1-5)</span><input id="dEffort" type="number" min="1" max="5" value="${i.effort || ""}"/></label></div>
       <label class="field"><span>Link</span><input id="dLink" value="${esc(i.link || "")}" placeholder="Reference URL"/></label>
       <label class="field"><span>Decision note</span><input id="dNote" value="${esc(i.decision_note || "")}" placeholder="Why approved / declined"/></label>
+      <label class="field"><span>Tags</span><div id="dTags"></div></label>
       <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input type="checkbox" id="dAdminOnly" ${i.admin_only ? "checked" : ""} style="width:auto"/> 🔒 Hosts only <span style="color:var(--faint);font-size:12px">— hidden from public &amp; volunteer lists</span></label>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn small" id="dSave">Save</button>
@@ -1059,7 +1098,8 @@ async function openIdeaDetail(id) {
   q("#dVote").onclick = async () => { const r = await doVote(id); q("#dVote").textContent = `👍 ${r.votes}`; };
   q("#dCommentBtn").onclick = async () => { const v = q("#dComment").value.trim(); if (!v) return; await post(`/api/ideas/${id}/comment`, { body: v, author_name: fab.dataset.name || null, author_person_id: fab.dataset.person || null }); box.remove(); ideasData = await get("/api/ideas").catch(() => ideasData); if ($("#ideasmount")) drawIdeas(); else if ($("#pubIdeas")) mountPublicIdeas(); else if ($("#volIdeas")) mountVolIdeas(); openIdeaDetail(id); };
   if (admin) {
-    q("#dSave").onclick = async () => { await patch(`/api/ideas/${id}`, { stage: q("#dStage").value, area_id: q("#dArea").value || null, link: q("#dLink").value.trim() || null, impact: q("#dImpact").value ? Number(q("#dImpact").value) : null, effort: q("#dEffort").value ? Number(q("#dEffort").value) : null, decision_note: q("#dNote").value.trim() || null, admin_only: q("#dAdminOnly").checked ? 1 : 0 }); box.remove(); await mountIdeas(); toast("Saved"); };
+    mountTagInput(q("#dTags"), String(i.tags || "").split(",").map((s) => s.trim()).filter(Boolean), collectIdeaTags());
+    q("#dSave").onclick = async () => { await patch(`/api/ideas/${id}`, { stage: q("#dStage").value, area_id: q("#dArea").value || null, link: q("#dLink").value.trim() || null, impact: q("#dImpact").value ? Number(q("#dImpact").value) : null, effort: q("#dEffort").value ? Number(q("#dEffort").value) : null, decision_note: q("#dNote").value.trim() || null, admin_only: q("#dAdminOnly").checked ? 1 : 0, tags: q("#dTags")._getTags() }); box.remove(); await mountIdeas(); toast("Saved"); };
     const pr = q("#dPromote"); if (pr) pr.onclick = () => { box.remove(); openPromoteModal(i); };
     q("#dDel").onclick = async () => { if (!confirm("Delete this idea?")) return; await del(`/api/ideas/${id}`); box.remove(); await mountIdeas(); };
   }

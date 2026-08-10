@@ -396,8 +396,8 @@ async function api(request, env, path) {
       // Only an admin/approver may file an idea as host-only.
       const adminOnly = b.admin_only && (await isApprover(request, env)) ? 1 : 0;
       const r = await env.DB.prepare(
-        `INSERT INTO ideas (title, description, link, submitter_name, submitter_person_id, area_id, category, thumb, admin_only) VALUES (?,?,?,?,?,?,?,?,?)`
-      ).bind(finalTitle, b.description || null, link, b.submitter_name || null, b.submitter_person_id || null, b.area_id || null, b.category || null, b.thumb || null, adminOnly).run();
+        `INSERT INTO ideas (title, description, link, submitter_name, submitter_person_id, area_id, category, thumb, admin_only, tags) VALUES (?,?,?,?,?,?,?,?,?,?)`
+      ).bind(finalTitle, b.description || null, link, b.submitter_name || null, b.submitter_person_id || null, b.area_id || null, b.category || null, b.thumb || null, adminOnly, normalizeTags(b.tags)).run();
       const ideaId = r.meta.last_row_id;
       if (Array.isArray(b.images)) { for (const img of b.images.slice(0, 6)) { if (typeof img === "string" && img.length < 900000) await env.DB.prepare("INSERT INTO idea_images (idea_id, data) VALUES (?,?)").bind(ideaId, img).run(); } }
       return json({ id: ideaId }, 201);
@@ -424,7 +424,8 @@ async function api(request, env, path) {
       const b = await body(request);
       if ("link" in b) b.link = normalizeUrl(b.link);
       if ("admin_only" in b) b.admin_only = b.admin_only ? 1 : 0;
-      await updateRow(env, "ideas", id, pick(b, ["title", "description", "link", "area_id", "category", "stage", "impact", "effort", "decision_note", "admin_only"]));
+      if ("tags" in b) b.tags = normalizeTags(b.tags);
+      await updateRow(env, "ideas", id, pick(b, ["title", "description", "link", "area_id", "category", "stage", "impact", "effort", "decision_note", "admin_only", "tags"]));
       return json({ ok: true });
     }
     if (method === "DELETE" && id) {

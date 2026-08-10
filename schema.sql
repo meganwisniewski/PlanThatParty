@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS ideas (
   promoted_task_id    INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
   admin_only          INTEGER DEFAULT 0,           -- 1 = visible to admins/approvers only
   thumb               TEXT,                        -- tiny inline preview (data URL) for cards
+  tags                TEXT,                        -- free-form CSV tags (e.g. "decor spooky")
   created_at          TEXT DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS idea_images (
