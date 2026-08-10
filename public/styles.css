@@ -270,7 +270,7 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .fbrow .meta { color: var(--muted); font-size: 12px; margin-top: 3px; }
 
 /* ---------------- feedback fab + modal ---------------- */
-.fab { position: fixed; right: 18px; bottom: 18px; z-index: 50; background: var(--accent-purple); color: #fff; border: none; border-radius: 999px; padding: 11px 17px; font-weight: 700; cursor: pointer; box-shadow: var(--shadow-panel); }
+.fab { position: fixed; right: 18px; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); z-index: 50; background: var(--accent-purple); color: #fff; border: none; border-radius: 999px; padding: 11px 17px; font-weight: 700; cursor: pointer; box-shadow: var(--shadow-panel); }
 .fab:hover { filter: brightness(1.08); }
 .modal-back { position: fixed; inset: 0; background: rgba(20, 16, 30, 0.4); z-index: 60; display: flex; align-items: center; justify-content: center; padding: 16px; }
 .modal { background: var(--surface); border-radius: 16px; width: 100%; max-width: 440px; padding: 22px; box-shadow: var(--shadow-panel); max-height: 90vh; overflow-y: auto; }
@@ -316,4 +316,19 @@ button, select, input, textarea { font: inherit; color: inherit; }
   .gt td.c-num { display: none; }
   .board { flex-direction: column; }
   .board-col { width: 100%; }
+}
+
+/* Touch-friendly sizing on phones / small screens. */
+@media (max-width: 820px) {
+  /* iOS Safari zooms the page when focusing a control smaller than 16px.
+     Force 16px on all form controls (!important beats inline font-sizes). */
+  input, select, textarea,
+  .field input, .field select, .field textarea { font-size: 16px !important; }
+  /* Comfortable tap targets (WCAG/Apple ~44px, Material 48px). */
+  .field input, .field select, .field textarea { min-height: 44px; }
+  .btn { min-height: 42px; }
+  .btn.small { min-height: 36px; }
+  .nav-item { padding-top: 11px; padding-bottom: 11px; }
+  /* Keep the last row of content clear of the home indicator + FAB. */
+  .canvas { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
 }
