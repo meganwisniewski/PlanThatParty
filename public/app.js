@@ -258,7 +258,7 @@ function sidebar() {
   const blocked = tasksAll().filter((t) => t.status === "blocked").length;
   return `
   <nav class="nav ${state.navOpen ? "open" : ""}">
-    <div class="brand"><span class="pk">🎃</span> Josephween</div>
+    <div class="brand" style="display:flex;align-items:center;gap:8px"><span class="pk">🎃</span> Josephween${matchMedia("(max-width:1000px)").matches ? `<button data-navclose aria-label="Close menu" style="margin-left:auto;background:none;border:none;font-size:22px;line-height:1;cursor:pointer;color:var(--muted);padding:2px 6px">✕</button>` : ""}</div>
     <button class="nav-item ${state.screen === "work" && state.dial === 0 ? "active" : ""}" data-overview><span class="emoji">◱</span> Overview</button>
     <div class="nav-group"><button class="lbl" data-fold-areas style="display:flex;align-items:center;gap:6px;width:100%;background:none;border:none;cursor:pointer;text-align:left">${folded ? "▸" : "▾"} Planning areas</button>
       ${folded ? "" : d.areas.map(areaItem).join("")}
@@ -774,7 +774,7 @@ function wire() {
   const who = $("[data-whoami]"); if (who) who.onchange = () => { setHostIdentity(who.value); toast(who.value ? `Posting as ${who.options[who.selectedIndex].text}` : "Name cleared"); };
   const sc = $("[data-saved-clear]"); if (sc) sc.onclick = () => { state.filter = { areaId: null, saved: null, q: "" }; render(); };
   const nt = $("[data-navtoggle]"); if (nt) nt.onclick = () => { state.navOpen = !state.navOpen; render(); };
-  const nbc = $("[data-navclose]"); if (nbc) nbc.onclick = () => { state.navOpen = false; render(); };
+  appEl.querySelectorAll("[data-navclose]").forEach((b) => (b.onclick = () => { state.navOpen = false; render(); }));
   const fa = $("[data-fold-areas]"); if (fa) fa.onclick = () => { setAreasFolded(!areasFolded()); render(); };
 
   // topbar
