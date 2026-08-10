@@ -904,11 +904,16 @@ function modal(inner, onSave) {
   back.addEventListener("click", (e) => { if (e.target === back) close(); });
   back.querySelector("[data-close]").onclick = close;
   const sv = back.querySelector("[data-save]"); if (sv) sv.onclick = async () => { try { await onSave(); close(); } catch (e) { toast(e.message || "Error"); } };
-  const f = back.querySelector("input,textarea,select"); if (f) f.focus();
+  // Autofocus the first field on desktop; skip on touch so the on-screen
+  // keyboard doesn't spring up every time a modal opens.
+  const f = back.querySelector("input,textarea,select");
+  if (f && !matchMedia("(pointer: coarse)").matches) f.focus();
   // Draggable: grab any non-interactive part of the dialog to move it aside.
   const dlg = back.querySelector(".modal");
   let drag = false, sx = 0, sy = 0, ox = 0, oy = 0;
   dlg.addEventListener("pointerdown", (e) => {
+    // Touch: don't drag — it would hijack scrolling the modal on a phone.
+    if (e.pointerType === "touch") return;
     // Don't start a drag on interactive bits or images — capturing the pointer
     // here would steal the click (e.g. from a zoomable photo's onclick).
     if (e.target.closest("input,textarea,select,button,a,label,img,[data-zoom]")) return;
