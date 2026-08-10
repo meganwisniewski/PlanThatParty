@@ -206,6 +206,9 @@ function matchesFilter(t) {
 // Stored per-device so a host is remembered between visits.
 function getHostId() { try { return localStorage.getItem("hostPersonId") || ""; } catch { return ""; } }
 function hostPeople() { return ((state.data && state.data.people) || []).filter((p) => ["host", "co-host"].includes(String(p.role || "").toLowerCase())); }
+// Planning-areas nav section folds up; folded by default until the host opens it.
+function areasFolded() { try { const v = localStorage.getItem("areasFolded"); return v === null ? true : v === "1"; } catch { return true; } }
+function setAreasFolded(f) { try { localStorage.setItem("areasFolded", f ? "1" : "0"); } catch {} }
 // Point fab.dataset (used as the comment/feedback author) at the stored host.
 function applyHostIdentity() {
   const id = getHostId();
@@ -238,6 +241,7 @@ function render() {
 
 function sidebar() {
   const d = state.data;
+  const folded = areasFolded();
   const areaItem = (a) => {
     const at = tasksAll().filter((t) => t.area_id === a.id);
     const done = at.filter((t) => t.status === "done").length;
@@ -253,8 +257,8 @@ function sidebar() {
   <nav class="nav ${state.navOpen ? "open" : ""}">
     <div class="brand"><span class="pk">🎃</span> Josephween</div>
     <button class="nav-item ${state.screen === "work" && state.dial === 0 ? "active" : ""}" data-overview><span class="emoji">◱</span> Overview</button>
-    <div class="nav-group"><div class="lbl">Planning areas</div>
-      ${d.areas.map(areaItem).join("")}
+    <div class="nav-group"><button class="lbl" data-fold-areas style="display:flex;align-items:center;gap:6px;width:100%;background:none;border:none;cursor:pointer;text-align:left">${folded ? "▸" : "▾"} Planning areas</button>
+      ${folded ? "" : d.areas.map(areaItem).join("")}
     </div>
     <div class="nav-group"><div class="lbl">Views</div>
       ${viewItem(null, "▦", "All tasks")}
@@ -767,6 +771,7 @@ function wire() {
   const who = $("[data-whoami]"); if (who) who.onchange = () => { setHostIdentity(who.value); toast(who.value ? `Posting as ${who.options[who.selectedIndex].text}` : "Name cleared"); };
   const sc = $("[data-saved-clear]"); if (sc) sc.onclick = () => { state.filter = { areaId: null, saved: null, q: "" }; render(); };
   const nt = $("[data-navtoggle]"); if (nt) nt.onclick = () => { state.navOpen = !state.navOpen; render(); };
+  const fa = $("[data-fold-areas]"); if (fa) fa.onclick = () => { setAreasFolded(!areasFolded()); render(); };
 
   // topbar
   const q = $("#q"); if (q) q.oninput = () => { state.filter.q = q.value; const c = $("#canvas"); if (c) c.innerHTML = canvas(); wireCanvas(); };
