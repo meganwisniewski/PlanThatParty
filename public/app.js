@@ -863,10 +863,12 @@ function tagChipsHtml(tags) {
   const list = String(tags || "").split(",").map((s) => s.trim()).filter(Boolean);
   return list.length ? `<span style="display:inline-flex;gap:4px;flex-wrap:wrap">${list.map((t) => `<span class="chip" style="background:var(--surface-2)">#${esc(t)}</span>`).join("")}</span>` : "";
 }
-// All tags used across existing ideas, for suggestions.
+// All tags already in use — across ideas AND tasks — for one-click reuse.
 function collectIdeaTags() {
   const out = [];
-  (ideasData || []).forEach((i) => String(i.tags || "").split(",").map((s) => s.trim()).filter(Boolean).forEach((t) => { if (!out.includes(t)) out.push(t); }));
+  const add = (csv) => String(csv || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean).forEach((t) => { if (!out.includes(t)) out.push(t); });
+  (ideasData || []).forEach((i) => add(i.tags));
+  try { (typeof tasksAll === "function" ? tasksAll() : []).forEach((t) => add(t.tags)); } catch {}
   return out.sort();
 }
 // Turns an empty container into a live tag editor. Read the result with root._getTags().
@@ -905,7 +907,9 @@ function modal(inner, onSave) {
   const dlg = back.querySelector(".modal");
   let drag = false, sx = 0, sy = 0, ox = 0, oy = 0;
   dlg.addEventListener("pointerdown", (e) => {
-    if (e.target.closest("input,textarea,select,button,a,label")) return;
+    // Don't start a drag on interactive bits or images — capturing the pointer
+    // here would steal the click (e.g. from a zoomable photo's onclick).
+    if (e.target.closest("input,textarea,select,button,a,label,img,[data-zoom]")) return;
     drag = true; sx = e.clientX; sy = e.clientY; dlg.style.cursor = "grabbing";
     try { dlg.setPointerCapture(e.pointerId); } catch {}
   });
