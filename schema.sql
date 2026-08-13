@@ -13,7 +13,29 @@ CREATE TABLE IF NOT EXISTS party (
   notes            TEXT,
   cal_details      TEXT,                     -- editable text shown in calendar-link events
   public_fields    TEXT DEFAULT 'name,event_date,start_time', -- CSV of fields guests may see
+  theme_concept    TEXT,                     -- finalized theme (Theme & Zones page)
+  theme_mood       TEXT,                     -- overall mood/aesthetic
+  theme_inspiration TEXT,                    -- references / inspirations
   admin_pin        TEXT
+);
+
+-- Physical zones of the house and their decor concept (Theme & Zones page).
+CREATE TABLE IF NOT EXISTS zones (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL,
+  vibe       TEXT,                          -- cute | unsettling | scary
+  decor      TEXT,                          -- freeform decor notes
+  sort_order INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Uploaded floor-plan images.
+CREATE TABLE IF NOT EXISTS floorplans (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT,
+  data       TEXT NOT NULL,                 -- image data URL
+  sort_order INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS areas (

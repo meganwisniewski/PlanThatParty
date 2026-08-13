@@ -247,6 +247,7 @@ function render() {
   // have the data (no re-fetch flash) — or they'd stay stuck on "Loading…".
   if (state.screen === "ideas") { if (ideasLoaded) drawIdeas(); else mountIdeas(); }
   else if (state.screen === "feedback") { if (fbData) drawFeedback(); else mountFeedback(); }
+  else if (state.screen === "theme") { if (fpData) drawFloorplans(); else mountFloorplans(); }
   const c = $(".canvas"); if (c) c.scrollTop = scrollY;
 }
 
@@ -282,6 +283,7 @@ function sidebar() {
       <button class="nav-item ${state.screen === "people" ? "active" : ""}" data-screen="people"><span class="emoji">👥</span> People <span class="count">${d.people.length}</span></button>
       <button class="nav-item ${state.screen === "guests" ? "active" : ""}" data-screen="guests"><span class="emoji">🎟️</span> Guests${(d.guests && d.guests.length) ? ` <span class="count">${d.guests.length}</span>` : ""}</button>
       ${(() => { const n = (d.checklist || []).filter((c) => !c.done).length; return `<button class="nav-item ${state.screen === "checklist" ? "active" : ""}" data-screen="checklist"><span class="emoji">✅</span> Checklist${n ? ` <span class="count">${n}</span>` : ""}</button>`; })()}
+      <button class="nav-item ${state.screen === "theme" ? "active" : ""}" data-screen="theme"><span class="emoji">🎨</span> Theme & Zones${(d.zones && d.zones.length) ? ` <span class="count">${d.zones.length}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "ideas" ? "active" : ""}" data-screen="ideas"><span class="emoji">💡</span> Ideas${d.newIdeas ? ` <span class="count">${d.newIdeas}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "feedback" ? "active" : ""}" data-screen="feedback"><span class="emoji">💬</span> Feedback${d.newFeedback ? ` <span class="count">${d.newFeedback}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "settings" ? "active" : ""}" data-screen="settings"><span class="emoji">⚙️</span> Settings</button>
@@ -322,6 +324,7 @@ function canvas() {
   if (state.screen === "people") return peopleView();
   if (state.screen === "guests") return guestsView();
   if (state.screen === "checklist") return checklistView();
+  if (state.screen === "theme") return themeView();
   if (state.screen === "ideas") return `<div id="ideasmount"><div class="empty">Loading ideas…</div></div>`;
   if (state.screen === "feedback") return `<div id="fbmount"><div class="empty">Loading…</div></div>`;
   if (state.screen === "settings") return settingsView();
@@ -635,6 +638,75 @@ function checklistView() {
   </div>`;
 }
 
+/* ---------------- THEME & ZONES (host-only) ---------------- */
+const VIBE_META = { cute: { label: "Cute", emoji: "💚", color: "#15803d", bg: "#e9f7ef" }, unsettling: { label: "Unsettling", emoji: "🌫️", color: "#b45309", bg: "#fdf3e7" }, scary: { label: "Scary", emoji: "💀", color: "#b42318", bg: "#fdeceb" } };
+function vibeChip(v) { const m = VIBE_META[v]; return m ? `<span class="chip" style="color:${m.color};background:${m.bg}">${m.emoji} ${m.label}</span>` : ""; }
+let fpData = null; // cached floor-plan images (fetched separately from state)
+
+function themeView() {
+  const p = state.data.party || {};
+  const zones = state.data.zones || [];
+  return `
+    <div style="max-width:920px">
+      <div><h1 style="margin:0;font-size:18px">🎨 Theme & Zones</h1><div class="countdown">The finalized look — the party theme and the decor concept for each part of the house. Hosts only.</div></div>
+
+      <div class="facts" style="margin-top:14px">
+        <h2>The theme</h2>
+        <label class="field"><span>Concept</span><textarea id="thConcept" rows="2" placeholder="e.g. A fantasy forest upstairs melting into a swamp below…">${esc(p.theme_concept || "")}</textarea></label>
+        <div class="field two"><label><span>Mood / aesthetic</span><input id="thMood" value="${esc(p.theme_mood || "")}" placeholder="Beautiful but unsettling"/></label><label><span>Inspirations</span><input id="thInspo" value="${esc(p.theme_inspiration || "")}" placeholder="LOTR, Game of Thrones, NeverEnding Story…"/></label></div>
+        <button class="btn primary" data-save-theme>Save theme</button>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:10px;margin:22px 0 10px"><h2 style="margin:0;font-size:15px">Zones</h2><span class="chip">${zones.length}</span><div class="grow"></div><button class="btn small primary" data-add-zone>+ Add zone</button></div>
+      <div class="cards">${zones.length ? zones.map(zoneCard).join("") : `<div class="empty">No zones yet — add the first area of the house.</div>`}</div>
+
+      <div style="display:flex;align-items:center;gap:10px;margin:24px 0 10px"><h2 style="margin:0;font-size:15px">Floor plans</h2><div class="grow"></div><label class="btn small" style="cursor:pointer">⬆ Upload<input type="file" id="fpUp" accept="image/*" multiple hidden/></label></div>
+      <div id="fpmount"><div class="empty" style="padding:16px">Loading floor plans…</div></div>
+    </div>`;
+}
+function zoneCard(z) {
+  return `<div class="pcard" data-zonecard="${z.id}">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h3>${esc(z.name)}</h3>${vibeChip(z.vibe)}<div class="grow"></div><button class="btn ghost small" data-edit-zone="${z.id}">Edit</button></div>
+    ${z.decor ? `<div style="font-size:13px;color:var(--muted);margin-top:8px;white-space:pre-wrap">${esc(z.decor)}</div>` : `<div style="font-size:13px;color:var(--faint);margin-top:8px">No decor notes yet.</div>`}
+    <div style="margin-top:10px"><button class="btn ghost small danger" data-del-zone="${z.id}">Remove</button></div>
+  </div>`;
+}
+async function mountFloorplans() {
+  const mount = $("#fpmount"); if (!mount) return;
+  try { fpData = await get("/api/floorplans"); } catch (e) { mount.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  drawFloorplans();
+}
+function drawFloorplans() {
+  const mount = $("#fpmount"); if (!mount) return;
+  const fps = fpData || [];
+  mount.innerHTML = fps.length
+    ? `<div style="display:flex;gap:12px;flex-wrap:wrap">${fps.map((f) => `<div style="position:relative"><img src="${f.data}" data-zoom="${f.data}" title="${esc(f.name || "")}" style="max-width:220px;max-height:220px;border-radius:10px;border:1px solid var(--line);cursor:zoom-in;background:#fff"/><button class="btn ghost small danger" data-del-fp="${f.id}" title="Remove" style="position:absolute;top:6px;right:6px">✕</button></div>`).join("")}</div>`
+    : `<div class="empty" style="padding:16px">No floor plans yet — upload an image (a photo, screenshot, or export of the plan). Tap to view full-screen once added.</div>`;
+  mount.querySelectorAll("[data-zoom]").forEach((im) => (im.onclick = () => openLightbox(im.dataset.zoom)));
+  mount.querySelectorAll("[data-del-fp]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this floor plan?")) return; await del("/api/floorplans/" + b.dataset.delFp); fpData = await get("/api/floorplans").catch(() => fpData); drawFloorplans(); }));
+}
+function openZoneModal(id) {
+  const z = id ? (state.data.zones || []).find((x) => x.id == id) || {} : {};
+  const vibeOpts = ["", "cute", "unsettling", "scary"].map((v) => `<option value="${v}" ${z.vibe === v ? "selected" : ""}>${v ? VIBE_META[v].emoji + " " + VIBE_META[v].label : "— vibe (optional) —"}</option>`).join("");
+  modal(`<h3>${id ? "Edit zone" : "Add a zone"}</h3>
+    <label class="field"><span>Area name</span><input id="zName" value="${esc(z.name || "")}" placeholder="e.g. Basement · Swamp"/></label>
+    <label class="field"><span>Vibe</span><select id="zVibe">${vibeOpts}</select></label>
+    <label class="field"><span>Decor notes</span><textarea id="zDecor" rows="6" placeholder="Props, colors, lighting, fog, reused materials, who's building it…">${esc(z.decor || "")}</textarea></label>`,
+    async () => {
+      const name = $("#zName").value.trim(); if (!name) return toast("Name the zone");
+      const payload = { name, vibe: $("#zVibe").value || null, decor: $("#zDecor").value.trim() || null };
+      if (id) await patch("/api/zones/" + id, payload); else await post("/api/zones", payload);
+      await refresh(); render(); toast("Saved");
+    });
+}
+function wireTheme() {
+  const st = $("[data-save-theme]"); if (st) st.onclick = async () => { await patch("/api/party", { theme_concept: $("#thConcept").value.trim() || null, theme_mood: $("#thMood").value.trim() || null, theme_inspiration: $("#thInspo").value.trim() || null }); await refresh(); toast("Theme saved"); };
+  const az = $("[data-add-zone]"); if (az) az.onclick = () => openZoneModal(null);
+  appEl.querySelectorAll("[data-edit-zone]").forEach((b) => (b.onclick = () => openZoneModal(Number(b.dataset.editZone))));
+  appEl.querySelectorAll("[data-del-zone]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this zone?")) return; await del("/api/zones/" + b.dataset.delZone); await refresh(); render(); }));
+  const up = $("#fpUp"); if (up) up.onchange = async () => { const files = [...up.files]; up.value = ""; if (files.length) toast("Uploading…"); for (const f of files) { try { const data = await resizeImage(f, 1600, 0.8); await post("/api/floorplans", { name: f.name, data }); } catch {} } fpData = await get("/api/floorplans").catch(() => fpData); drawFloorplans(); toast("Uploaded"); };
+}
+
 /* ---------------- GUESTS (private, host-only) ---------------- */
 const GUEST_STATUS = [["coming", "✅ Coming"], ["maybe", "🤔 Maybe"], ["invited", "✉️ Invited"], ["cant", "❌ Can't"]];
 const GS_COLOR = { coming: "#15803d", maybe: "#b45309", invited: "#5c6470", cant: "#b42318" };
@@ -839,6 +911,8 @@ function wireCanvas() {
   const spb = $("[data-save-party]"); if (spb) spb.onclick = async () => { await patch("/api/party", { name: $("#stName").value.trim(), event_date: $("#stDate").value || null, start_time: $("#stTime").value.trim() || null, location: $("#stLoc").value.trim() || null, theme: $("#stTheme").value.trim() || null, headcount_target: $("#stHead").value ? Number($("#stHead").value) : null, budget_target: $("#stBudget").value ? Number($("#stBudget").value) : null, notes: $("#stNotes").value.trim() || null, cal_details: $("#stCal").value.trim() || null }); await refresh(); render(); toast("Saved"); };
   const pubb = $("[data-save-public]"); if (pubb) pubb.onclick = async () => { const fields = [...appEl.querySelectorAll("[data-pub]:checked")].map((c) => c.dataset.pub).join(","); await patch("/api/party", { public_fields: fields }); await refresh(); render(); toast("Public info updated"); };
   const pinb = $("[data-save-pin]"); if (pinb) pinb.onclick = async () => { const v = $("#stPin").value.trim(); if (!v) return toast("Type a PIN"); await patch("/api/party", { admin_pin: v }); setPin(v); await refresh(); render(); toast("PIN saved"); };
+  // theme & zones
+  if (state.screen === "theme") wireTheme();
 }
 
 function wirePanel() {

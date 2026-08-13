@@ -461,7 +461,7 @@ async function api(request, env, path) {
     // Host-only: the full plan (tasks, people, everything) requires the admin PIN.
     const gate = await requireAdmin(request, env);
     if (gate) return gate;
-    const [party, areas, people, tasks, supplies, fb, ni, gu, cl] = await Promise.all([
+    const [party, areas, people, tasks, supplies, fb, ni, gu, cl, zn] = await Promise.all([
       getParty(env),
       env.DB.prepare("SELECT * FROM areas ORDER BY sort_order, id").all(),
       env.DB.prepare("SELECT * FROM people ORDER BY name").all(),
@@ -485,6 +485,7 @@ async function api(request, env, path) {
       env.DB.prepare("SELECT COUNT(*) AS n FROM ideas WHERE stage = 'submitted'").first(),
       env.DB.prepare("SELECT * FROM guests ORDER BY created_at DESC").all(),
       env.DB.prepare("SELECT * FROM checklist ORDER BY sort_order, id").all(),
+      env.DB.prepare("SELECT * FROM zones ORDER BY sort_order, id").all(),
     ]);
     return json({
       party: partyClient(party),
@@ -495,6 +496,7 @@ async function api(request, env, path) {
       supplies: supplies.results,
       guests: gu.results,
       checklist: cl.results,
+      zones: zn.results,
       newFeedback: fb ? fb.n : 0,
       newIdeas: ni ? ni.n : 0,
     });
@@ -503,7 +505,7 @@ async function api(request, env, path) {
   // ---------- party ----------
   if (resource === "party" && method === "PATCH") {
     const b = await body(request);
-    await updateRow(env, "party", 1, pick(b, ["name", "event_date", "start_time", "location", "theme", "headcount_target", "budget_target", "notes", "cal_details", "public_fields", "admin_pin"]));
+    await updateRow(env, "party", 1, pick(b, ["name", "event_date", "start_time", "location", "theme", "headcount_target", "budget_target", "notes", "cal_details", "public_fields", "theme_concept", "theme_mood", "theme_inspiration", "admin_pin"]));
     return json({ ok: true });
   }
 
@@ -531,6 +533,52 @@ async function api(request, env, path) {
     }
     if (method === "DELETE" && id) {
       await env.DB.prepare("DELETE FROM checklist WHERE id = ?").bind(id).run();
+      return json({ ok: true });
+    }
+  }
+
+  // ---------- zones (decor concept per house area — host-only) ----------
+  if (resource === "zones") {
+    const gate = await requireAdmin(request, env);
+    if (gate) return gate;
+    if (method === "POST") {
+      const b = await body(request);
+      if (!b.name || !b.name.trim()) return err("Zone name required.");
+      const r = await env.DB.prepare(
+        "INSERT INTO zones (name, vibe, decor, sort_order) VALUES (?,?,?,?)"
+      ).bind(b.name.trim(), b.vibe || null, b.decor || null, b.sort_order || 0).run();
+      return json({ id: r.meta.last_row_id }, 201);
+    }
+    if (method === "PATCH" && id) {
+      const b = await body(request);
+      await updateRow(env, "zones", id, pick(b, ["name", "vibe", "decor", "sort_order"]));
+      return json({ ok: true });
+    }
+    if (method === "DELETE" && id) {
+      await env.DB.prepare("DELETE FROM zones WHERE id = ?").bind(id).run();
+      return json({ ok: true });
+    }
+  }
+
+  // ---------- floor plans (uploaded images — host-only) ----------
+  if (resource === "floorplans") {
+    const gate = await requireAdmin(request, env);
+    if (gate) return gate;
+    if (method === "GET") {
+      const rows = (await env.DB.prepare("SELECT * FROM floorplans ORDER BY sort_order, id").all()).results;
+      return json(rows);
+    }
+    if (method === "POST") {
+      const b = await body(request);
+      if (!b.data || typeof b.data !== "string") return err("Image required.");
+      if (b.data.length > 1500000) return err("Image too large.");
+      const r = await env.DB.prepare(
+        "INSERT INTO floorplans (name, data, sort_order) VALUES (?,?,?)"
+      ).bind(b.name || null, b.data, b.sort_order || 0).run();
+      return json({ id: r.meta.last_row_id }, 201);
+    }
+    if (method === "DELETE" && id) {
+      await env.DB.prepare("DELETE FROM floorplans WHERE id = ?").bind(id).run();
       return json({ ok: true });
     }
   }
