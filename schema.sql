@@ -118,6 +118,7 @@ CREATE TABLE IF NOT EXISTS ideas (
   submitter_name      TEXT,
   submitter_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
   area_id             INTEGER REFERENCES areas(id) ON DELETE SET NULL,
+  zone_id             INTEGER REFERENCES zones(id) ON DELETE SET NULL,  -- optional house zone this idea is for
   category            TEXT,
   stage               TEXT DEFAULT 'submitted',  -- submitted | screening | approved | promoted | declined | parked
   impact              INTEGER,                    -- 1..5, optional score

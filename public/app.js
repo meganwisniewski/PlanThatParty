@@ -270,7 +270,7 @@ function render() {
   // have the data (no re-fetch flash) — or they'd stay stuck on "Loading…".
   if (state.screen === "ideas") { if (ideasLoaded) drawIdeas(); else mountIdeas(); }
   else if (state.screen === "feedback") { if (fbData) drawFeedback(); else mountFeedback(); }
-  else if (state.screen === "theme") { if (fpData) drawFloorplans(); else mountFloorplans(); }
+  else if (state.screen === "theme") { if (fpData) drawFloorplans(); else mountFloorplans(); if (zonePhotos) drawZonePhotos(); else mountZonePhotos(); }
   const c = $(".canvas"); if (c) c.scrollTop = scrollY;
 }
 
@@ -676,6 +676,7 @@ function checklistView() {
 const VIBE_META = { cute: { label: "Cute", emoji: "💚", color: "#15803d", bg: "#e9f7ef" }, unsettling: { label: "Unsettling", emoji: "🌫️", color: "#b45309", bg: "#fdf3e7" }, scary: { label: "Scary", emoji: "💀", color: "#b42318", bg: "#fdeceb" } };
 function vibeChip(v) { const m = VIBE_META[v]; return m ? `<span class="chip" style="color:${m.color};background:${m.bg}">${m.emoji} ${m.label}</span>` : ""; }
 let fpData = null; // cached floor-plan images (fetched separately from state)
+let zonePhotos = null; // cached [{zone_id, idea_id, title, thumb}] for the per-zone galleries
 
 function themeView() {
   const p = state.data.party || {};
@@ -702,8 +703,24 @@ function zoneCard(z) {
   return `<div class="pcard" data-zonecard="${z.id}">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h3>${esc(z.name)}</h3>${vibeChip(z.vibe)}<div class="grow"></div><button class="btn ghost small" data-edit-zone="${z.id}">Edit</button></div>
     ${z.decor ? `<div style="font-size:13px;color:var(--muted);margin-top:8px;white-space:pre-wrap">${esc(z.decor)}</div>` : `<div style="font-size:13px;color:var(--faint);margin-top:8px">No decor notes yet.</div>`}
+    <div class="zphotos" id="zph-${z.id}"></div>
     <div style="margin-top:10px"><button class="btn ghost small danger" data-del-zone="${z.id}">Remove</button></div>
   </div>`;
+}
+async function mountZonePhotos() {
+  try { zonePhotos = await get("/api/zones/photos"); } catch { zonePhotos = []; }
+  drawZonePhotos();
+}
+function drawZonePhotos() {
+  if (!zonePhotos) return;
+  const byZone = {};
+  zonePhotos.forEach((p) => { if (p.thumb) (byZone[p.zone_id] = byZone[p.zone_id] || []).push(p); });
+  (state.data.zones || []).forEach((z) => {
+    const el = $("#zph-" + z.id); if (!el) return;
+    const list = byZone[z.id] || [];
+    el.innerHTML = list.length ? `<div class="section-title" style="margin:12px 0 6px">Idea photos · ${list.length}</div><div class="zstrip">${list.map((p) => `<img src="${p.thumb}" data-zoomidea="${p.idea_id}" title="${esc(p.title || "")}" alt="${esc(p.title || "")}"/>`).join("")}</div>` : "";
+    el.querySelectorAll("[data-zoomidea]").forEach((im) => (im.onclick = async () => { if (!ideasLoaded) { try { ideasData = await get("/api/ideas"); ideasLoaded = true; } catch {} } openIdeaDetail(Number(im.dataset.zoomidea)); }));
+  });
 }
 async function mountFloorplans() {
   const mount = $("#fpmount"); if (!mount) return;
@@ -1226,7 +1243,8 @@ function ideasList() {
   return `<div class="grid-wrap" style="padding:6px 14px">${sorted.map((i) => `
     <div class="fbrow" data-idea="${i.id}" style="cursor:pointer;align-items:center">
       <button class="btn small ghost" data-vote="${i.id}">👍 ${i.votes || 0}</button>
-      <div class="fm"><div style="font-weight:600">${esc(i.title)} <span class="chip" style="color:${IS_COLOR[i.stage]}">${IS_EMOJI[i.stage]} ${IS_LABEL[i.stage]}</span></div>
+      ${i.thumb ? `<img src="${i.thumb}" class="ithumb" alt="" loading="lazy"/>` : ""}
+      <div class="fm"><div style="font-weight:600">${esc(i.title)} <span class="chip" style="color:${IS_COLOR[i.stage]}">${IS_EMOJI[i.stage]} ${IS_LABEL[i.stage]}</span>${i.images > 1 ? ` <span class="chip">📷 ${i.images}</span>` : ""}</div>
         <div class="meta">${i.area_emoji ? `${i.area_emoji} ${esc(i.area_name || "")} · ` : ""}${esc(i.submitter_person_name || i.submitter_name || "Anonymous")}${i.comments ? "" : " · 💬 0"}</div></div>
       ${hotPill(i)}
     </div>`).join("")}</div>`;
@@ -1264,6 +1282,7 @@ function openIdeaModal(personId, personName, onDone) {
   const areasSrc = (state.data ? state.data.areas : (volCtx.data && volCtx.data.areas)) || [];
   const areaOpts = `<option value="">— area (optional) —</option>` + areasSrc.map((a) => `<option value="${a.id}">${a.emoji || ""} ${esc(a.name)}</option>`).join("");
   const hasAreas = areasSrc.length > 0;
+  const zonesSrc = (state.data && state.data.zones) || []; // zones are a host-only concept
   const canFlag = (!!getPin() && !!state.data) || !!window.__approverToken; // host or approver
   modal(`<h3>Share an idea</h3><p class="hint">A suggestion for the party — decor, food, a bit of theatre, anything. It enters the pipeline for review.</p>
     <label class="field"><span>Idea <span style="color:var(--faint);font-weight:400">(optional if you add a photo or link)</span></span><input id="iTitle" placeholder="One line — what's the idea?"/></label>
@@ -1271,6 +1290,7 @@ function openIdeaModal(personId, personName, onDone) {
     <label class="field"><span>Link (optional)</span><input id="iLink" type="url" inputmode="url" placeholder="Paste a URL — a build, product, or inspo photo"/></label>
     <label class="field"><span>Photos (optional)</span><input id="iPhotos" type="file" accept="image/*" multiple/><div id="iPrev" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"></div></label>
     <div class="field ${hasAreas ? "two" : ""}">${hasAreas ? `<label><span>Area (optional)</span><select id="iArea">${areaOpts}</select></label>` : ""}${personId ? "" : `<label><span>Your name (optional)</span><input id="iName" value="${esc(personName || "")}"/></label>`}</div>
+    ${zonesSrc.length ? `<label class="field"><span>House zone (optional)</span><select id="iZone"><option value="">— none —</option>${zonesSrc.map((z) => `<option value="${z.id}">${esc(z.name)}</option>`).join("")}</select></label>` : ""}
     <label class="field"><span>Tags (optional)</span><div id="iTags"></div></label>
     ${canFlag ? `<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;margin-top:2px"><input type="checkbox" id="iAdminOnly" style="width:auto"/> 🔒 Hosts only <span style="color:var(--faint);font-size:12px">— hidden from the public &amp; volunteer lists</span></label>` : ""}`,
     async () => {
@@ -1278,7 +1298,8 @@ function openIdeaModal(personId, personName, onDone) {
       const descV = $("#iDesc").value.trim(), linkV = $("#iLink").value.trim();
       if (!title && !descV && !linkV && !photos.length) throw new Error("Add a photo, a link, or a note first");
       const tg = $("#iTags"); const tags = tg && tg._getTags ? tg._getTags() : [];
-      await post("/api/ideas", { title: title || null, description: descV || null, link: linkV || null, area_id: ($("#iArea") ? $("#iArea").value : "") || null, submitter_person_id: personId || null, submitter_name: personId ? null : ($("#iName") ? $("#iName").value.trim() : null), thumb: photos[0] ? photos[0].thumb : null, images: photos.map((p) => p.full), admin_only: ($("#iAdminOnly") && $("#iAdminOnly").checked) ? 1 : 0, tags });
+      await post("/api/ideas", { title: title || null, description: descV || null, link: linkV || null, area_id: ($("#iArea") ? $("#iArea").value : "") || null, zone_id: ($("#iZone") ? $("#iZone").value : "") || null, submitter_person_id: personId || null, submitter_name: personId ? null : ($("#iName") ? $("#iName").value.trim() : null), thumb: photos[0] ? photos[0].thumb : null, images: photos.map((p) => p.full), admin_only: ($("#iAdminOnly") && $("#iAdminOnly").checked) ? 1 : 0, tags });
+      zonePhotos = null; // a new idea may belong to a zone — refresh that gallery next visit
       toast("Idea shared 🎉"); if (onDone) onDone(); else await mountIdeas();
     });
   const box = document.body.lastElementChild;
@@ -1298,6 +1319,7 @@ async function openIdeaDetail(id) {
   let images = []; try { images = await get(`/api/ideas/${id}/images`); } catch {}
   const admin = !!getPin() && !!state.data;
   const areaOpts = state.data ? `<option value="">—</option>` + state.data.areas.map((a) => `<option value="${a.id}" ${i.area_id == a.id ? "selected" : ""}>${a.emoji || ""} ${esc(a.name)}</option>`).join("") : "";
+  const zoneOpts = state.data ? `<option value="">— none —</option>` + (state.data.zones || []).map((z) => `<option value="${z.id}" ${i.zone_id == z.id ? "selected" : ""}>${esc(z.name)}</option>`).join("") : "";
   modal(`
     <h3 style="margin-bottom:4px">${esc(i.title)}</h3>
     ${i.description ? `<p class="hint">${esc(i.description)}</p>` : ""}
@@ -1307,12 +1329,14 @@ async function openIdeaDetail(id) {
       <span class="chip" style="color:${IS_COLOR[i.stage]}">${IS_EMOJI[i.stage]} ${IS_LABEL[i.stage]}</span>
       ${i.admin_only ? `<span class="chip" style="color:#b42318" title="Hidden from public & volunteer lists">🔒 Hosts only</span>` : ""}
       ${i.area_emoji ? `<span class="chip">${i.area_emoji} ${esc(i.area_name || "")}</span>` : ""}
+      ${i.zone_name ? `<span class="chip" style="background:#f3efff;color:var(--accent-purple)">🏠 ${esc(i.zone_name)}</span>` : ""}
       <span style="color:var(--muted);font-size:12px">by ${esc(i.submitter_person_name || i.submitter_name || "Anonymous")}</span>
     </div>
     ${i.tags ? `<div style="margin-bottom:12px">${tagChipsHtml(i.tags)}</div>` : ""}
     ${images.length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${images.map((im) => `<img src="${im.data}" data-zoom="${im.data}" style="max-width:150px;max-height:150px;border-radius:8px;border:1px solid var(--line);cursor:zoom-in"/>`).join("")}</div>` : ""}
     ${admin ? `<div class="fact-box" style="background:var(--surface-2);border-color:var(--line)">
       <div class="field two"><label><span>Stage</span><select id="dStage">${IDEA_STAGES.map((s) => `<option value="${s}" ${i.stage === s ? "selected" : ""}>${IS_EMOJI[s]} ${IS_LABEL[s]}</option>`).join("")}</select></label><label><span>Area</span><select id="dArea">${areaOpts}</select></label></div>
+      <label class="field"><span>House zone <span style="color:var(--faint);font-weight:400">— groups its photos on Theme &amp; Zones</span></span><select id="dZone">${zoneOpts}</select></label>
       <div class="field two"><label><span>Impact (1-5)</span><input id="dImpact" type="number" min="1" max="5" value="${i.impact || ""}"/></label><label><span>Effort (1-5)</span><input id="dEffort" type="number" min="1" max="5" value="${i.effort || ""}"/></label></div>
       <label class="field"><span>Link</span><input id="dLink" value="${esc(i.link || "")}" placeholder="Reference URL"/></label>
       <label class="field"><span>Decision note</span><input id="dNote" value="${esc(i.decision_note || "")}" placeholder="Why approved / declined"/></label>
@@ -1335,7 +1359,7 @@ async function openIdeaDetail(id) {
   q("#dCommentBtn").onclick = async () => { const v = q("#dComment").value.trim(); if (!v) return; await post(`/api/ideas/${id}/comment`, { body: v, author_name: fab.dataset.name || null, author_person_id: fab.dataset.person || null }); box.remove(); ideasData = await get("/api/ideas").catch(() => ideasData); if ($("#ideasmount")) drawIdeas(); else if ($("#pubIdeas")) mountPublicIdeas(); else if ($("#volIdeas")) mountVolIdeas(); openIdeaDetail(id); };
   if (admin) {
     mountTagInput(q("#dTags"), String(i.tags || "").split(",").map((s) => s.trim()).filter(Boolean), collectIdeaTags());
-    q("#dSave").onclick = async () => { await patch(`/api/ideas/${id}`, { stage: q("#dStage").value, area_id: q("#dArea").value || null, link: q("#dLink").value.trim() || null, impact: q("#dImpact").value ? Number(q("#dImpact").value) : null, effort: q("#dEffort").value ? Number(q("#dEffort").value) : null, decision_note: q("#dNote").value.trim() || null, admin_only: q("#dAdminOnly").checked ? 1 : 0, tags: q("#dTags")._getTags() }); box.remove(); await mountIdeas(); toast("Saved"); };
+    q("#dSave").onclick = async () => { await patch(`/api/ideas/${id}`, { stage: q("#dStage").value, area_id: q("#dArea").value || null, zone_id: q("#dZone").value || null, link: q("#dLink").value.trim() || null, impact: q("#dImpact").value ? Number(q("#dImpact").value) : null, effort: q("#dEffort").value ? Number(q("#dEffort").value) : null, decision_note: q("#dNote").value.trim() || null, admin_only: q("#dAdminOnly").checked ? 1 : 0, tags: q("#dTags")._getTags() }); zonePhotos = null; box.remove(); await mountIdeas(); toast("Saved"); };
     const pr = q("#dPromote"); if (pr) pr.onclick = () => { box.remove(); openPromoteModal(i); };
     q("#dDel").onclick = async () => { if (!confirm("Delete this idea?")) return; await del(`/api/ideas/${id}`); box.remove(); await mountIdeas(); };
   }
