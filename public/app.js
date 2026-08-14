@@ -285,6 +285,7 @@ function sidebar() {
       <button class="nav-item ${state.screen === "guests" ? "active" : ""}" data-screen="guests"><span class="emoji">🎟️</span> Guests${(d.guests && d.guests.length) ? ` <span class="count">${d.guests.length}</span>` : ""}</button>
       ${(() => { const n = (d.checklist || []).filter((c) => !c.done).length; return `<button class="nav-item ${state.screen === "checklist" ? "active" : ""}" data-screen="checklist"><span class="emoji">✅</span> Checklist${n ? ` <span class="count">${n}</span>` : ""}</button>`; })()}
       <button class="nav-item ${state.screen === "theme" ? "active" : ""}" data-screen="theme"><span class="emoji">🎨</span> Theme & Zones${(d.zones && d.zones.length) ? ` <span class="count">${d.zones.length}</span>` : ""}</button>
+      <button class="nav-item ${state.screen === "events" ? "active" : ""}" data-screen="events"><span class="emoji">📅</span> Events${(d.events && d.events.length) ? ` <span class="count">${d.events.length}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "ideas" ? "active" : ""}" data-screen="ideas"><span class="emoji">💡</span> Ideas${d.newIdeas ? ` <span class="count">${d.newIdeas}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "feedback" ? "active" : ""}" data-screen="feedback"><span class="emoji">💬</span> Feedback${d.newFeedback ? ` <span class="count">${d.newFeedback}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "settings" ? "active" : ""}" data-screen="settings"><span class="emoji">⚙️</span> Settings</button>
@@ -330,6 +331,7 @@ function canvas() {
   if (state.screen === "guests") return guestsView();
   if (state.screen === "checklist") return checklistView();
   if (state.screen === "theme") return themeView();
+  if (state.screen === "events") return eventsView();
   if (state.screen === "ideas") return `<div id="ideasmount"><div class="empty">Loading ideas…</div></div>`;
   if (state.screen === "feedback") return `<div id="fbmount"><div class="empty">Loading…</div></div>`;
   if (state.screen === "settings") return settingsView();
@@ -713,6 +715,44 @@ function wireTheme() {
   const up = $("#fpUp"); if (up) up.onchange = async () => { const files = [...up.files]; up.value = ""; if (files.length) toast("Uploading…"); for (const f of files) { try { const data = await resizeImage(f, 1600, 0.8); await post("/api/floorplans", { name: f.name, data }); } catch {} } fpData = await get("/api/floorplans").catch(() => fpData); drawFloorplans(); toast("Uploaded"); };
 }
 
+/* ---------------- EVENTS (host-only) ---------------- */
+function eventsView() {
+  const evs = state.data.events || [];
+  return `<div style="max-width:760px">
+    <div style="display:flex;align-items:center;margin-bottom:14px"><div><h1 style="margin:0;font-size:18px">📅 Events</h1><div class="countdown">Everything leading up to the party — movie nights, craft days, setup, day-of, tear down.</div></div><div class="grow"></div><button class="btn primary" data-add-event>+ Add event</button></div>
+    <div class="cards">${evs.length ? evs.map(eventCard).join("") : `<div class="empty">No events yet — add the first one.</div>`}</div>
+  </div>`;
+}
+function eventCard(e) {
+  const cd = e.event_date ? countdown(e.event_date) : null;
+  return `<div class="pcard" data-eventcard="${e.id}">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h3>${esc(e.title)}</h3><div class="grow"></div><button class="btn ghost small" data-edit-event="${e.id}">Edit</button></div>
+    <div class="chan">${e.event_date ? `🗓️ ${esc(fmtDate(e.event_date))}${cd ? ` · <b style="color:${cd.days < 0 ? "var(--muted)" : "var(--accent-strong)"}">${esc(cd.text)}</b>` : ""}` : `<span style="color:var(--faint)">No date set yet</span>`}${e.start_time ? ` · ${esc(e.start_time)}` : ""}</div>
+    ${e.location ? `<div style="font-size:13px;color:var(--muted);margin-top:4px">📍 ${esc(e.location)}</div>` : ""}
+    ${e.notes ? `<div style="font-size:13px;color:var(--muted);margin-top:6px;white-space:pre-wrap">${esc(e.notes)}</div>` : ""}
+    <div style="margin-top:10px"><button class="btn ghost small danger" data-del-event="${e.id}">Remove</button></div>
+  </div>`;
+}
+function openEventModal(id) {
+  const e = id ? (state.data.events || []).find((x) => x.id == id) || {} : {};
+  modal(`<h3>${id ? "Edit event" : "Add an event"}</h3>
+    <label class="field"><span>Title</span><input id="evTitle" value="${esc(e.title || "")}" placeholder="e.g. 🎃 Pumpkin day"/></label>
+    <div class="field two"><label><span>Date</span><input id="evDate" type="date" value="${esc(e.event_date || "")}"/></label><label><span>Start time</span><input id="evTime" value="${esc(e.start_time || "")}" placeholder="2pm"/></label></div>
+    <label class="field"><span>Location</span><input id="evLoc" value="${esc(e.location || "")}" placeholder="optional"/></label>
+    <label class="field"><span>Notes</span><textarea id="evNotes" rows="3" placeholder="Who's coming, what to bring, plan…">${esc(e.notes || "")}</textarea></label>`,
+    async () => {
+      const title = $("#evTitle").value.trim(); if (!title) return toast("Add a title");
+      const payload = { title, event_date: $("#evDate").value || null, start_time: $("#evTime").value.trim() || null, location: $("#evLoc").value.trim() || null, notes: $("#evNotes").value.trim() || null };
+      if (id) await patch("/api/events/" + id, payload); else await post("/api/events", payload);
+      await refresh(); render(); toast("Saved");
+    });
+}
+function wireEvents() {
+  const ae = $("[data-add-event]"); if (ae) ae.onclick = () => openEventModal(null);
+  appEl.querySelectorAll("[data-edit-event]").forEach((b) => (b.onclick = () => openEventModal(Number(b.dataset.editEvent))));
+  appEl.querySelectorAll("[data-del-event]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this event?")) return; await del("/api/events/" + b.dataset.delEvent); await refresh(); render(); }));
+}
+
 /* ---------------- GUESTS (private, host-only) ---------------- */
 const GUEST_STATUS = [["coming", "✅ Coming"], ["maybe", "🤔 Maybe"], ["invited", "✉️ Invited"], ["cant", "❌ Can't"]];
 const GS_COLOR = { coming: "#15803d", maybe: "#b45309", invited: "#5c6470", cant: "#b42318" };
@@ -920,6 +960,7 @@ function wireCanvas() {
   const pinb = $("[data-save-pin]"); if (pinb) pinb.onclick = async () => { const v = $("#stPin").value.trim(); if (!v) return toast("Type a PIN"); await patch("/api/party", { admin_pin: v }); setPin(v); await refresh(); render(); toast("PIN saved"); };
   // theme & zones
   if (state.screen === "theme") wireTheme();
+  if (state.screen === "events") wireEvents();
 }
 
 function wirePanel() {
