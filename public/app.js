@@ -196,6 +196,7 @@ const taskTags = (t) => String((t && t.tags) || "").split(",").map((s) => s.trim
 function matchesFilter(t) {
   const f = state.filter;
   if (f.q) { const q = f.q.toLowerCase(); if (!((t.title || "").toLowerCase().includes(q) || (t.description || "").toLowerCase().includes(q))) return false; }
+  if (f.assignee && t.assignee_id != f.assignee) return false; // owner filter — layers on top of the rest
   if (f.tag) return taskTags(t).includes(f.tag);
   if (f.areaId) return t.area_id == f.areaId;
   if (f.saved === "unassigned") return !t.assignee_id && t.status !== "done";
@@ -296,6 +297,9 @@ function sidebar() {
 function topbar(party, cd) {
   const showWork = state.screen === "work";
   const scope = state.filter.areaId ? (areaById(state.filter.areaId) || {}).name : state.filter.saved ? { unassigned: "Needs owner", blocked: "Blocked", week: "Due this week" }[state.filter.saved] : "All areas";
+  const me = fab.dataset.person;
+  const people = (state.data && state.data.people) || [];
+  const ownerSel = `<select class="cell-sel" data-owner style="width:auto" title="Filter by owner"><option value="">👥 Everyone</option>${me ? `<option value="${me}" ${String(state.filter.assignee) === String(me) ? "selected" : ""}>🙋 Just me</option>` : ""}${people.filter((p) => String(p.id) !== String(me)).map((p) => `<option value="${p.id}" ${String(state.filter.assignee) === String(p.id) ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select>`;
   return `
   <div class="topbar">
     <div class="topbar-row">
@@ -312,6 +316,7 @@ function topbar(party, cd) {
       ${dialMarkup(state.dial, ["Overview", "Working", "One task"], "dial")}
       <div class="grow"></div>
       ${state.dial === 1 ? `<span class="countdown">${esc(scope)}</span>
+      ${ownerSel}
       ${state.view !== "board" ? `<button class="btn small ghost" data-toggle-done>${state.showDone ? "☑ Showing done" : "☐ Show done"}</button>` : ""}
       <div class="viewswitch">
         ${["grid", "board", "calendar", "timeline"].map((v) => `<button class="${state.view === v ? "on" : ""}" data-view="${v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join("")}
@@ -351,7 +356,7 @@ function gridView() {
   let n = 0;
   const groups = areas.map((a) => {
     const rows = areaOrderedRows(a.id);
-    if (!rows.length && (state.filter.saved || state.filter.q || state.filter.tag)) return "";
+    if (!rows.length && (state.filter.saved || state.filter.q || state.filter.tag || state.filter.assignee)) return "";
     const done = rows.filter((r) => r.t.status === "done").length;
     const pct = rows.length ? Math.round((done / rows.length) * 100) : 0;
     const shown = state.showDone ? rows : rows.filter((r) => r.t.status !== "done");
@@ -847,8 +852,8 @@ function selectTask(id, openPanel) { state.selectedTaskId = id; if (openPanel) s
 
 function wire() {
   // nav
-  appEl.querySelectorAll("[data-area]").forEach((b) => (b.onclick = () => { state.screen = "work"; state.dial = 1; state.filter = { areaId: Number(b.dataset.area), saved: null, q: state.filter.q }; state.navOpen = false; render(); }));
-  appEl.querySelectorAll("[data-saved]").forEach((b) => (b.onclick = () => { state.screen = "work"; state.dial = 1; state.filter = { areaId: null, saved: b.dataset.saved || null, q: state.filter.q }; state.navOpen = false; render(); }));
+  appEl.querySelectorAll("[data-area]").forEach((b) => (b.onclick = () => { state.screen = "work"; state.dial = 1; state.filter = { areaId: Number(b.dataset.area), saved: null, q: state.filter.q, assignee: state.filter.assignee }; state.navOpen = false; render(); }));
+  appEl.querySelectorAll("[data-saved]").forEach((b) => (b.onclick = () => { state.screen = "work"; state.dial = 1; state.filter = { areaId: null, saved: b.dataset.saved || null, q: state.filter.q, assignee: state.filter.assignee }; state.navOpen = false; render(); }));
   const ov = $("[data-overview]"); if (ov) ov.onclick = () => { state.screen = "work"; state.dial = 0; state.filter = { areaId: null, saved: null, q: "" }; state.navOpen = false; render(); };
   appEl.querySelectorAll("[data-screen]").forEach((b) => (b.onclick = () => { state.screen = b.dataset.screen; state.navOpen = false; render(); }));
   const lo = $("[data-logout]"); if (lo) lo.onclick = () => { clearPin(); state.data = null; state.navOpen = false; renderGuest(); };
@@ -862,6 +867,7 @@ function wire() {
   const q = $("#q"); if (q) q.oninput = () => { state.filter.q = q.value; const c = $("#canvas"); if (c) c.innerHTML = canvas(); wireCanvas(); };
   appEl.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => { state.view = b.dataset.view; render(); }));
   const td = $("[data-toggle-done]"); if (td) td.onclick = () => { state.showDone = !state.showDone; render(); };
+  const ow = $("[data-owner]"); if (ow) ow.onchange = () => { state.filter.assignee = ow.value || null; render(); };
   appEl.querySelectorAll("[data-add-task]").forEach((b) => (b.onclick = () => openTaskModal(null, b.dataset.area ? Number(b.dataset.area) : state.filter.areaId)));
   const dialEl = $("#dial"); if (dialEl) wireDial(dialEl, state.dial, 3, (l) => { state.dial = l; render(); });
 
