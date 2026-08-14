@@ -415,6 +415,11 @@ button, select, input, textarea { font: inherit; color: inherit; }
      so the Save/Cancel controls at the bottom are always reachable. */
   .modal-back { padding: 0; align-items: flex-end; }
   .modal { max-width: none; width: 100%; max-height: 92vh; border-radius: 16px 16px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom, 0px)); }
+  /* iOS Safari's position:sticky is unreliable inside -webkit-overflow-scrolling
+     containers, so the sticky ✕ could scroll out of reach on a long sheet. Pin it
+     as a fixed floating button so it's ALWAYS tappable, no matter the scroll. */
+  .modal-xrow { position: static; height: auto; }
+  .modal-x { position: fixed; top: calc(10px + env(safe-area-inset-top, 0px)); right: 14px; transform: none; z-index: 80; width: 42px; height: 42px; font-size: 18px; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); box-shadow: 0 3px 12px rgba(0,0,0,.28); }
 }
 
 /* Touch-friendly sizing on phones / small screens. */
