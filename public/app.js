@@ -196,6 +196,9 @@ const taskTags = (t) => String((t && t.tags) || "").split(",").map((s) => s.trim
 function matchesFilter(t) {
   const f = state.filter;
   if (f.q) { const q = f.q.toLowerCase(); if (!((t.title || "").toLowerCase().includes(q) || (t.description || "").toLowerCase().includes(q))) return false; }
+  // Owner filter combines (AND) with area/saved/tag: "only mine" resolves to
+  // whoever is set in "I'm posting as"; a specific id filters to that person.
+  if (f.assignee) { const who = f.assignee === "me" ? getHostId() : f.assignee; if (who && t.assignee_id != who) return false; }
   if (f.tag) return taskTags(t).includes(f.tag);
   if (f.areaId) return t.area_id == f.areaId;
   if (f.saved === "unassigned") return !t.assignee_id && t.status !== "done";
@@ -295,7 +298,15 @@ function sidebar() {
 
 function topbar(party, cd) {
   const showWork = state.screen === "work";
-  const scope = state.filter.areaId ? (areaById(state.filter.areaId) || {}).name : state.filter.saved ? { unassigned: "Needs owner", blocked: "Blocked", week: "Due this week" }[state.filter.saved] : "All areas";
+  let scope = state.filter.areaId ? (areaById(state.filter.areaId) || {}).name : state.filter.saved ? { unassigned: "Needs owner", blocked: "Blocked", week: "Due this week" }[state.filter.saved] : "All areas";
+  if (state.filter.assignee) { const who = state.filter.assignee === "me" ? getHostId() : state.filter.assignee; const pn = who ? (personById(who) || {}).name : null; scope += ` · ${state.filter.assignee === "me" ? "mine" : (pn ? pn + "’s" : "assigned")}`; }
+  const ownerFilter = () => {
+    const cur = state.filter.assignee || "";
+    const me = getHostId();
+    const opts = [`<option value="">👤 Anyone</option>`, me ? `<option value="me" ${cur === "me" ? "selected" : ""}>👤 Only mine</option>` : ""]
+      .concat((state.data.people || []).map((p) => `<option value="${p.id}" ${String(cur) === String(p.id) ? "selected" : ""}>${esc(p.name)}</option>`));
+    return `<select class="ownerfilter" data-ownerfilter title="Filter by who it's assigned to">${opts.join("")}</select>`;
+  };
   return `
   <div class="topbar">
     <div class="topbar-row">
@@ -312,6 +323,7 @@ function topbar(party, cd) {
       ${dialMarkup(state.dial, ["Overview", "Working", "One task"], "dial")}
       <div class="grow"></div>
       ${state.dial === 1 ? `<span class="countdown">${esc(scope)}</span>
+      ${ownerFilter()}
       ${state.view !== "board" ? `<button class="btn small ghost" data-toggle-done>${state.showDone ? "☑ Showing done" : "☐ Show done"}</button>` : ""}
       <div class="viewswitch">
         ${["grid", "board", "calendar", "timeline"].map((v) => `<button class="${state.view === v ? "on" : ""}" data-view="${v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join("")}
@@ -351,7 +363,7 @@ function gridView() {
   let n = 0;
   const groups = areas.map((a) => {
     const rows = areaOrderedRows(a.id);
-    if (!rows.length && (state.filter.saved || state.filter.q || state.filter.tag)) return "";
+    if (!rows.length && (state.filter.saved || state.filter.q || state.filter.tag || state.filter.assignee)) return "";
     const done = rows.filter((r) => r.t.status === "done").length;
     const pct = rows.length ? Math.round((done / rows.length) * 100) : 0;
     const shown = state.showDone ? rows : rows.filter((r) => r.t.status !== "done");
@@ -847,12 +859,13 @@ function selectTask(id, openPanel) { state.selectedTaskId = id; if (openPanel) s
 
 function wire() {
   // nav
-  appEl.querySelectorAll("[data-area]").forEach((b) => (b.onclick = () => { state.screen = "work"; state.dial = 1; state.filter = { areaId: Number(b.dataset.area), saved: null, q: state.filter.q }; state.navOpen = false; render(); }));
-  appEl.querySelectorAll("[data-saved]").forEach((b) => (b.onclick = () => { state.screen = "work"; state.dial = 1; state.filter = { areaId: null, saved: b.dataset.saved || null, q: state.filter.q }; state.navOpen = false; render(); }));
+  appEl.querySelectorAll("[data-area]").forEach((b) => (b.onclick = () => { state.screen = "work"; state.dial = 1; state.filter = { areaId: Number(b.dataset.area), saved: null, q: state.filter.q, assignee: state.filter.assignee }; state.navOpen = false; render(); }));
+  appEl.querySelectorAll("[data-saved]").forEach((b) => (b.onclick = () => { state.screen = "work"; state.dial = 1; state.filter = { areaId: null, saved: b.dataset.saved || null, q: state.filter.q, assignee: state.filter.assignee }; state.navOpen = false; render(); }));
   const ov = $("[data-overview]"); if (ov) ov.onclick = () => { state.screen = "work"; state.dial = 0; state.filter = { areaId: null, saved: null, q: "" }; state.navOpen = false; render(); };
   appEl.querySelectorAll("[data-screen]").forEach((b) => (b.onclick = () => { state.screen = b.dataset.screen; state.navOpen = false; render(); }));
   const lo = $("[data-logout]"); if (lo) lo.onclick = () => { clearPin(); state.data = null; state.navOpen = false; renderGuest(); };
   const who = $("[data-whoami]"); if (who) who.onchange = () => { setHostIdentity(who.value); toast(who.value ? `Posting as ${who.options[who.selectedIndex].text}` : "Name cleared"); };
+  const owf = $("[data-ownerfilter]"); if (owf) owf.onchange = () => { state.filter.assignee = owf.value || null; render(); };
   const sc = $("[data-saved-clear]"); if (sc) sc.onclick = () => { state.filter = { areaId: null, saved: null, q: "" }; render(); };
   const nt = $("[data-navtoggle]"); if (nt) nt.onclick = () => { state.navOpen = !state.navOpen; render(); };
   appEl.querySelectorAll("[data-navclose]").forEach((b) => (b.onclick = () => { state.navOpen = false; render(); }));
@@ -979,13 +992,19 @@ function mountTagInput(root, initial, suggestions) {
 }
 
 /* ---------------- modals ---------------- */
-function modal(inner, onSave) {
+function modal(inner, onSave, opts = {}) {
   const back = document.createElement("div"); back.className = "modal-back";
-  back.innerHTML = `<div class="modal"><div class="modal-xrow"><button class="modal-x" data-close aria-label="Close">✕</button></div>${inner}<div class="modal-actions"><button class="btn ghost" data-close>Cancel</button>${onSave ? `<button class="btn primary" data-save>Save</button>` : ""}</div></div>`;
+  // A modal's backdrop sits above the floating 💬 button, so give every dialog
+  // its own in-context feedback affordance — you can react to what you're
+  // looking at (e.g. the edit-person view) without closing it first.
+  const fbBtn = opts.noFeedback ? "" : `<button class="btn ghost small modal-fb" type="button" data-modal-fb>💬 Feedback</button>`;
+  back.innerHTML = `<div class="modal"><div class="modal-xrow"><button class="modal-x" data-close aria-label="Close">✕</button></div>${inner}<div class="modal-actions">${fbBtn}<button class="btn ghost" data-close>Cancel</button>${onSave ? `<button class="btn primary" data-save>Save</button>` : ""}</div></div>`;
   document.body.appendChild(back);
   const close = () => back.remove();
   back.addEventListener("click", (e) => { if (e.target === back) close(); });
   back.querySelectorAll("[data-close]").forEach((b) => (b.onclick = close));
+  const mfb = back.querySelector("[data-modal-fb]");
+  if (mfb) mfb.onclick = () => { const h = back.querySelector("h3"); const label = h ? h.textContent.trim() : ""; openFeedback({ target: label ? `“${label}” dialog` : "A pop-up dialog" }); };
   const sv = back.querySelector("[data-save]"); if (sv) sv.onclick = async () => { try { await onSave(); close(); } catch (e) { toast(e.message || "Error"); } };
   // Autofocus the first field on desktop; skip on touch so the on-screen
   // keyboard doesn't spring up every time a modal opens.
@@ -1005,6 +1024,7 @@ function modal(inner, onSave) {
   });
   dlg.addEventListener("pointermove", (e) => { if (drag) dlg.style.transform = `translate(${ox + e.clientX - sx}px, ${oy + e.clientY - sy}px)`; });
   dlg.addEventListener("pointerup", (e) => { if (!drag) return; drag = false; ox += e.clientX - sx; oy += e.clientY - sy; dlg.style.cursor = ""; });
+  close.el = back; // handle to this dialog's root, so callers can scope queries when modals stack
   return close;
 }
 function openTaskModal(id, presetArea) {
@@ -1265,7 +1285,7 @@ async function mountPublicIdeas() {
 /* ---------------- feedback widget (with element picker) ---------------- */
 let fbState = null, fbCloseModal = null;
 function openFeedback(prefill) {
-  fbState = { sentiment: (prefill && prefill.sentiment) || null, message: (prefill && prefill.text) || "", target: null, authorName: fab.dataset.name || "" };
+  fbState = { sentiment: (prefill && prefill.sentiment) || null, message: (prefill && prefill.text) || "", target: (prefill && prefill.target) || null, authorName: fab.dataset.name || "" };
   showFeedbackModal();
 }
 function saveFbInputs() { const m = $("#fbMsg"); if (m) fbState.message = m.value; const n = $("#fbName"); if (n) fbState.authorName = n.value; }
@@ -1295,9 +1315,12 @@ function showFeedbackModal(sent) {
       fbState = { sentiment: null, message: "", target: null, authorName: keepName };
       fbCloseModal();
       showFeedbackModal(true); // reopen cleared so they can add another
-    });
-  const sv = document.querySelector(".modal-actions [data-save]"); if (sv) sv.textContent = "Send";
-  const cx = document.querySelector(".modal-actions [data-close]"); if (cx) cx.textContent = "Done";
+    }, { noFeedback: true });
+  // Scope to THIS modal — the feedback dialog can stack on top of another modal
+  // (e.g. edit-person), so a document-wide query would relabel the wrong buttons.
+  const root = fbCloseModal.el || document;
+  const sv = root.querySelector(".modal-actions [data-save]"); if (sv) sv.textContent = "Send";
+  const cx = root.querySelector(".modal-actions [data-close]"); if (cx) cx.textContent = "Done";
   document.querySelectorAll(".sentiments [data-sent]").forEach((b) => (b.onclick = () => { fbState.sentiment = b.dataset.sent; document.querySelectorAll(".sentiments [data-sent]").forEach((x) => x.classList.remove("sel")); b.classList.add("sel"); }));
   const pick = $("#fbPick"); if (pick) pick.onclick = () => { saveFbInputs(); fbCloseModal(); startElementPick(); };
   const clr = $("#fbClr"); if (clr) clr.onclick = () => { saveFbInputs(); fbState.target = null; fbCloseModal(); showFeedbackModal(); };

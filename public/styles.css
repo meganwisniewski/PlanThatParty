@@ -83,6 +83,9 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .viewswitch button { border: none; background: none; padding: 6px 13px; border-radius: 7px; cursor: pointer; color: var(--muted); font-weight: 600; font-size: 13px; }
 .viewswitch button.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-card); }
 
+.ownerfilter { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 6px 9px; font-size: 13px; font-weight: 600; cursor: pointer; max-width: 160px; }
+.ownerfilter:hover { border-color: var(--line-strong); }
+
 .search { display: flex; align-items: center; gap: 6px; background: var(--surface-2); border-radius: 8px; padding: 6px 10px; }
 .search input { border: none; background: none; outline: none; width: 150px; }
 
@@ -286,6 +289,8 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .sentiments .btn { flex: 1; }
 .sentiments .btn.sel { border-color: var(--accent-purple); background: #f3efff; }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+/* In-modal feedback button — pinned to the left so Cancel/Save stay on the right. */
+.modal-fb { margin-right: auto; color: var(--accent-purple); }
 .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 78px; background: #15803d; color: #fff; padding: 10px 16px; border-radius: 10px; font-weight: 600; z-index: 70; box-shadow: var(--shadow-panel); }
 
 /* ---------------- volunteer view ---------------- */
