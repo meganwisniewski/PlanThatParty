@@ -461,7 +461,7 @@ async function api(request, env, path) {
     // Host-only: the full plan (tasks, people, everything) requires the admin PIN.
     const gate = await requireAdmin(request, env);
     if (gate) return gate;
-    const [party, areas, people, tasks, supplies, fb, ni, gu, cl, zn] = await Promise.all([
+    const [party, areas, people, tasks, supplies, fb, ni, gu, cl, zn, ev] = await Promise.all([
       getParty(env),
       env.DB.prepare("SELECT * FROM areas ORDER BY sort_order, id").all(),
       env.DB.prepare("SELECT * FROM people ORDER BY name").all(),
@@ -486,6 +486,7 @@ async function api(request, env, path) {
       env.DB.prepare("SELECT * FROM guests ORDER BY created_at DESC").all(),
       env.DB.prepare("SELECT * FROM checklist ORDER BY sort_order, id").all(),
       env.DB.prepare("SELECT * FROM zones ORDER BY sort_order, id").all(),
+      env.DB.prepare("SELECT * FROM events ORDER BY (event_date IS NULL), event_date, start_time, sort_order, id").all(),
     ]);
     return json({
       party: partyClient(party),
@@ -497,6 +498,7 @@ async function api(request, env, path) {
       guests: gu.results,
       checklist: cl.results,
       zones: zn.results,
+      events: ev.results,
       newFeedback: fb ? fb.n : 0,
       newIdeas: ni ? ni.n : 0,
     });
@@ -556,6 +558,40 @@ async function api(request, env, path) {
     }
     if (method === "DELETE" && id) {
       await env.DB.prepare("DELETE FROM zones WHERE id = ?").bind(id).run();
+      return json({ ok: true });
+    }
+  }
+
+  // ---------- events (movie night, setup days, day-of, tear-down — host-only) ----------
+  if (resource === "events") {
+    const gate = await requireAdmin(request, env);
+    if (gate) return gate;
+    const EV_FIELDS = ["title", "kind", "event_date", "start_time", "end_time", "location", "notes", "sort_order"];
+    if (method === "GET") {
+      const rows = (await env.DB.prepare("SELECT * FROM events ORDER BY (event_date IS NULL), event_date, start_time, sort_order, id").all()).results;
+      return json(rows);
+    }
+    if (method === "POST") {
+      const b = await body(request);
+      // Bulk seed of the starter timeline (POST /api/events { seed: [ {...}, ... ] }).
+      if (Array.isArray(b.seed)) {
+        let n = 0;
+        for (const e of b.seed) { if (e && e.title) { await env.DB.prepare("INSERT INTO events (title, kind, event_date, start_time, end_time, location, notes, sort_order) VALUES (?,?,?,?,?,?,?,?)").bind(e.title, e.kind || null, e.event_date || null, e.start_time || null, e.end_time || null, e.location || null, e.notes || null, e.sort_order || n).run(); n++; } }
+        return json({ ok: true, added: n }, 201);
+      }
+      if (!b.title || !b.title.trim()) return err("Event name required.");
+      const r = await env.DB.prepare(
+        "INSERT INTO events (title, kind, event_date, start_time, end_time, location, notes, sort_order) VALUES (?,?,?,?,?,?,?,?)"
+      ).bind(b.title.trim(), b.kind || null, b.event_date || null, b.start_time || null, b.end_time || null, b.location || null, b.notes || null, b.sort_order || 0).run();
+      return json({ id: r.meta.last_row_id }, 201);
+    }
+    if (method === "PATCH" && id) {
+      const b = await body(request);
+      await updateRow(env, "events", id, pick(b, EV_FIELDS));
+      return json({ ok: true });
+    }
+    if (method === "DELETE" && id) {
+      await env.DB.prepare("DELETE FROM events WHERE id = ?").bind(id).run();
       return json({ ok: true });
     }
   }

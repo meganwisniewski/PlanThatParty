@@ -46,6 +46,21 @@ CREATE TABLE IF NOT EXISTS areas (
   sort_order  INTEGER DEFAULT 0
 );
 
+-- Events: sub-events on the way to (and including) the party — movie night,
+-- craft days, pumpkin carving, setup sessions, day-of activities, tear-down.
+CREATE TABLE IF NOT EXISTS events (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  title       TEXT NOT NULL,
+  kind        TEXT,                          -- movie | craft | pumpkin | setup | dayof | teardown | other
+  event_date  TEXT,
+  start_time  TEXT,
+  end_time    TEXT,
+  location    TEXT,
+  notes       TEXT,
+  sort_order  INTEGER DEFAULT 0,
+  created_at  TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS people (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   name              TEXT NOT NULL,

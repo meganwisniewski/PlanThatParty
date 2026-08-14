@@ -66,6 +66,26 @@ function googleCalUrl(party) {
   if (party.location) p.set("location", party.location);
   return "https://calendar.google.com/calendar/render?" + p.toString();
 }
+// ---- events ----
+const EVENT_KINDS = [["movie", "🎬", "Movie night"], ["craft", "✂️", "Craft day"], ["pumpkin", "🎃", "Pumpkin day"], ["setup", "🔨", "Setup"], ["dayof", "🎉", "Day-of"], ["teardown", "🧹", "Tear-down"], ["other", "📌", "Other"]];
+const EK_EMOJI = Object.fromEntries(EVENT_KINDS.map(([k, e]) => [k, e]));
+const EK_LABEL = Object.fromEntries(EVENT_KINDS.map(([k, e, l]) => [k, l]));
+// A Google Calendar "add event" link for a dated event (all-day).
+function eventGCalUrl(ev, party) {
+  if (!ev.event_date) return null;
+  const ymd = ev.event_date.replace(/-/g, "");
+  const [y, m, d] = ev.event_date.split("-").map(Number);
+  const nd = new Date(Date.UTC(y, m - 1, d + 1));
+  const end = `${nd.getUTCFullYear()}${String(nd.getUTCMonth() + 1).padStart(2, "0")}${String(nd.getUTCDate()).padStart(2, "0")}`;
+  const p = new URLSearchParams();
+  p.set("action", "TEMPLATE");
+  p.set("text", `${EK_EMOJI[ev.kind] || "🎃"} ${ev.title}`);
+  p.set("dates", `${ymd}/${end}`);
+  const det = [ev.start_time ? `Time: ${ev.start_time}${ev.end_time ? "–" + ev.end_time : ""}` : "", ev.notes || ""].filter(Boolean).join("\n");
+  if (det) p.set("details", det);
+  if (ev.location || (party && party.location)) p.set("location", ev.location || party.location);
+  return "https://calendar.google.com/calendar/render?" + p.toString();
+}
 // ---- ideas ----
 const IDEA_STAGES = ["submitted", "screening", "approved", "promoted", "declined", "parked"];
 const IS_LABEL = { submitted: "Submitted", screening: "Screening", approved: "Approved", promoted: "Promoted", declined: "Declined", parked: "Parked" };
@@ -285,6 +305,7 @@ function sidebar() {
     <div class="nav-group">
       <button class="nav-item ${state.screen === "people" ? "active" : ""}" data-screen="people"><span class="emoji">👥</span> People <span class="count">${d.people.length}</span></button>
       <button class="nav-item ${state.screen === "guests" ? "active" : ""}" data-screen="guests"><span class="emoji">🎟️</span> Guests${(d.guests && d.guests.length) ? ` <span class="count">${d.guests.length}</span>` : ""}</button>
+      <button class="nav-item ${state.screen === "events" ? "active" : ""}" data-screen="events"><span class="emoji">📅</span> Events${(d.events && d.events.length) ? ` <span class="count">${d.events.length}</span>` : ""}</button>
       ${(() => { const n = (d.checklist || []).filter((c) => !c.done).length; return `<button class="nav-item ${state.screen === "checklist" ? "active" : ""}" data-screen="checklist"><span class="emoji">✅</span> Checklist${n ? ` <span class="count">${n}</span>` : ""}</button>`; })()}
       <button class="nav-item ${state.screen === "theme" ? "active" : ""}" data-screen="theme"><span class="emoji">🎨</span> Theme & Zones${(d.zones && d.zones.length) ? ` <span class="count">${d.zones.length}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "ideas" ? "active" : ""}" data-screen="ideas"><span class="emoji">💡</span> Ideas${d.newIdeas ? ` <span class="count">${d.newIdeas}</span>` : ""}</button>
@@ -335,6 +356,7 @@ function topbar(party, cd) {
 function canvas() {
   if (state.screen === "people") return peopleView();
   if (state.screen === "guests") return guestsView();
+  if (state.screen === "events") return eventsView();
   if (state.screen === "checklist") return checklistView();
   if (state.screen === "theme") return themeView();
   if (state.screen === "ideas") return `<div id="ideasmount"><div class="empty">Loading ideas…</div></div>`;
@@ -759,6 +781,73 @@ function guestsView() {
   </div>`;
 }
 
+/* ---------------- EVENTS (host-only) ---------------- */
+function eventsView() {
+  const evs = state.data.events || [];
+  const party = state.data.party || {};
+  const dated = evs.filter((e) => e.event_date);
+  const undated = evs.filter((e) => !e.event_date);
+  const card = (e) => {
+    const cd = e.event_date ? countdown(e.event_date) : null;
+    const when = e.event_date ? `${fmtDate(e.event_date)}${cd ? ` · <b>${esc(cd.text)}</b>` : ""}` : "Not scheduled yet";
+    const time = e.start_time ? `${esc(e.start_time)}${e.end_time ? "–" + esc(e.end_time) : ""}` : "";
+    const gcal = eventGCalUrl(e, party);
+    return `<div class="evcard">
+      <div class="evkind">${EK_EMOJI[e.kind] || "📌"}</div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h3 style="margin:0;font-size:15px">${esc(e.title)}</h3>${e.kind ? `<span class="chip">${esc(EK_LABEL[e.kind] || e.kind)}</span>` : ""}</div>
+        <div class="evwhen">🗓️ ${when}${time ? ` · ⏰ ${time}` : ""}${e.location ? ` · 📍 ${esc(e.location)}` : ""}</div>
+        ${e.notes ? `<div class="evnotes">${esc(e.notes)}</div>` : ""}
+        <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+          <button class="btn small ghost" data-edit-event="${e.id}">Edit</button>
+          ${gcal ? `<a class="btn small ghost" href="${gcal}" target="_blank" rel="noopener">📅 Add to calendar</a>` : ""}
+          <button class="btn small ghost danger" data-del-event="${e.id}">Remove</button>
+        </div>
+      </div>
+    </div>`;
+  };
+  return `<div style="max-width:760px">
+    <div style="display:flex;align-items:center;margin-bottom:14px"><div><h1 style="margin:0;font-size:18px">📅 Events</h1><div class="countdown">Everything on the way to the party — movie nights, craft &amp; pumpkin days, setup, day-of, and tear-down.</div></div><div class="grow"></div><button class="btn primary" data-add-event>+ Add event</button></div>
+    ${evs.length ? `
+      ${dated.length ? `<div class="evlist">${dated.map(card).join("")}</div>` : ""}
+      ${undated.length ? `<div class="section-title" style="margin:18px 0 8px">Not scheduled yet</div><div class="evlist">${undated.map(card).join("")}</div>` : ""}
+    ` : `<div class="empty panel" style="padding:30px">
+        <div class="big">No events yet.</div>
+        <div class="meta" style="margin:6px 0 14px">Add them one at a time, or drop in a starter timeline you can fill in later.</div>
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn primary" data-add-event>+ Add event</button><button class="btn" data-seed-events>✨ Add starter timeline</button></div>
+      </div>`}</div>`;
+}
+function openEventModal(id) {
+  const e = id ? (state.data.events || []).find((x) => x.id == id) || {} : {};
+  const kindOpts = `<option value="">—</option>` + EVENT_KINDS.map(([k, em, l]) => `<option value="${k}" ${e.kind === k ? "selected" : ""}>${em} ${l}</option>`).join("");
+  modal(`<h3>${id ? "Edit event" : "Add event"}</h3>
+    <label class="field"><span>Name</span><input id="evName" value="${esc(e.title || "")}" placeholder="e.g. Pumpkin carving day"/></label>
+    <div class="field two"><label><span>Type</span><select id="evKind">${kindOpts}</select></label><label><span>Date</span><input id="evDate" type="date" value="${esc(e.event_date || "")}"/></label></div>
+    <div class="field two"><label><span>Start time</span><input id="evStart" value="${esc(e.start_time || "")}" placeholder="e.g. 6:00 PM"/></label><label><span>End time</span><input id="evEnd" value="${esc(e.end_time || "")}" placeholder="optional"/></label></div>
+    <label class="field"><span>Location</span><input id="evLoc" value="${esc(e.location || "")}" placeholder="optional"/></label>
+    <label class="field"><span>Notes</span><textarea id="evNotes" rows="2" placeholder="What's happening, what to bring…">${esc(e.notes || "")}</textarea></label>`,
+    async () => {
+      const payload = { title: $("#evName").value.trim(), kind: $("#evKind").value || null, event_date: $("#evDate").value || null, start_time: $("#evStart").value.trim() || null, end_time: $("#evEnd").value.trim() || null, location: $("#evLoc").value.trim() || null, notes: $("#evNotes").value.trim() || null };
+      if (!payload.title) return toast("Add a name");
+      if (id) await patch("/api/events/" + id, payload); else await post("/api/events", payload);
+      await refresh(); render(); toast("Saved");
+    });
+}
+async function seedStarterEvents() {
+  const seed = [
+    { title: "Movie night", kind: "movie" },
+    { title: "Craft day #1", kind: "craft" },
+    { title: "Craft day #2", kind: "craft" },
+    { title: "Pumpkin carving day", kind: "pumpkin" },
+    { title: "Setup #1", kind: "setup" },
+    { title: "Setup #2", kind: "setup" },
+    { title: "Day-of activities", kind: "dayof" },
+    { title: "Tear-down", kind: "teardown" },
+  ];
+  await post("/api/events", { seed });
+  await refresh(); render(); toast("Starter timeline added — fill in the dates");
+}
+
 function peopleView() {
   const d = state.data;
   return `<div style="display:flex;align-items:center;margin-bottom:14px"><div><h1 style="margin:0;font-size:18px">The crew</h1><div class="countdown">Each person gets a private link showing only their tasks, on their channel.</div></div><div class="grow"></div><button class="btn primary" data-add-person>+ Add person</button></div>
@@ -915,6 +1004,11 @@ function wireCanvas() {
   appEl.querySelectorAll("[data-gstatus]").forEach((s) => (s.onchange = async () => { await patch("/api/guests/" + s.dataset.gstatus, { status: s.value }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-gplus]").forEach((i) => (i.onchange = async () => { await patch("/api/guests/" + i.dataset.gplus, { plus_count: i.value ? Number(i.value) : 0 }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-gdel]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this guest?")) return; await del("/api/guests/" + b.dataset.gdel); await refresh(); render(); }));
+  // events
+  const aev = $("[data-add-event]"); if (aev) aev.onclick = () => openEventModal();
+  const sev = $("[data-seed-events]"); if (sev) sev.onclick = seedStarterEvents;
+  appEl.querySelectorAll("[data-edit-event]").forEach((b) => (b.onclick = () => openEventModal(Number(b.dataset.editEvent))));
+  appEl.querySelectorAll("[data-del-event]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this event?")) return; await del("/api/events/" + b.dataset.delEvent); await refresh(); render(); }));
   // checklist
   const acb = $("[data-add-cl]"); if (acb) { const addC = async () => { const label = $("#clLabel").value.trim(); if (!label) return; const section = $("#clSection").value.trim() || null; await post("/api/checklist", { label, section }); await refresh(); render(); }; acb.onclick = addC; const cll = $("#clLabel"); if (cll) cll.onkeydown = (e) => { if (e.key === "Enter") addC(); }; }
   appEl.querySelectorAll("[data-cldone]").forEach((c) => (c.onchange = async () => { await patch("/api/checklist/" + c.dataset.cldone, { done: c.checked ? 1 : 0 }); await refresh(); render(); }));

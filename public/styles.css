@@ -266,6 +266,14 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .pcard .chan { font-size: 13px; color: var(--muted); margin: 8px 0; }
 .pcard .chan b { color: var(--ink); }
 .pcard .pnote { font-size: 13px; color: var(--ink); background: var(--surface-2); border-radius: 8px; padding: 8px 10px; margin-top: 10px; white-space: pre-wrap; line-height: 1.4; }
+
+/* events */
+.evlist { display: flex; flex-direction: column; gap: 10px; }
+.evcard { display: flex; gap: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow-card); }
+.evkind { font-size: 26px; line-height: 1; flex: none; }
+.evwhen { font-size: 13px; color: var(--muted); margin-top: 6px; }
+.evwhen b { color: var(--accent-strong); }
+.evnotes { font-size: 13px; color: var(--ink); background: var(--surface-2); border-radius: 8px; padding: 8px 10px; margin-top: 10px; white-space: pre-wrap; line-height: 1.4; }
 .chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--surface-2); color: var(--muted); }
 
 .fbrow { display: flex; gap: 10px; padding: 12px 0; border-top: 1px solid var(--line); }
