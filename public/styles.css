@@ -129,8 +129,8 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .mini-track { width: 90px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
 .mini-track > div { height: 100%; background: #15803d; }
 
-.tasktitle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-.tasktitle .tt { font-weight: 600; }
+.tasktitle { display: flex; align-items: center; gap: 8px; cursor: pointer; flex-wrap: wrap; }
+.tasktitle .tt { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .tasktitle .tt.done { color: var(--faint); text-decoration: line-through; text-decoration-color: var(--line-strong); }
 .tasktitle.indent { padding-left: 22px; }
 .fact-badge { font-size: 11px; color: var(--accent-strong); background: #fff3ec; border: 1px solid #ffd9c2; border-radius: 5px; padding: 0 5px; font-weight: 600; white-space: nowrap; }
@@ -224,7 +224,9 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .field { display: block; margin-bottom: 14px; }
 .field > span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; font-weight: 600; }
 .field input, .field select, .field textarea { width: 100%; border: 1px solid var(--line-strong); background: var(--surface); border-radius: 8px; padding: 8px 10px; }
-.field.two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+/* minmax(0,1fr) lets the columns shrink below the inputs' intrinsic width —
+   without it the two-column rows overflow the sheet on narrow phones. */
+.field.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
 .fact-box { background: #fff8f3; border: 1px solid #ffd9c2; border-radius: 10px; padding: 12px; margin-bottom: 14px; }
 .fact-box .fh { font-size: 12px; font-weight: 700; color: var(--accent-strong); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
 .subtasks { margin-bottom: 14px; }
@@ -401,6 +403,19 @@ button, select, input, textarea { font: inherit; color: inherit; }
 
 @media (max-width: 640px) {
   .canvas { padding: 12px; }
+  /* Tighter chrome + no horizontal overflow on small phones (e.g. iPhone mini, 360px) */
+  .topbar { padding: 10px 12px; }
+  .viewswitch { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .viewswitch::-webkit-scrollbar { display: none; }
+  .viewswitch button { padding: 6px 10px; font-size: 12px; white-space: nowrap; }
+  .grouphdr .mini-track { width: 54px; }
+  .grouphdr button.gh { gap: 7px; padding: 9px 10px; }
+  .ownerfilter { max-width: 140px; }
+  /* Let descriptive subtitles wrap instead of getting clipped on narrow screens. */
+  .countdown { white-space: normal; }
+  /* On the narrow task cards, let the title own its line and wrap badges/tags below. */
+  .gt tbody tr.task .tasktitle { row-gap: 5px; }
+  .gt tbody tr.task .tasktitle .tt { flex: 1 1 100%; }
   /* grid becomes cards */
   .gt, .gt thead { display: none; }
   .grid-wrap { border: none; background: transparent; box-shadow: none; }
@@ -415,7 +430,9 @@ button, select, input, textarea { font: inherit; color: inherit; }
   /* Modals become bottom sheets: full width, tall, and reliably scrollable
      so the Save/Cancel controls at the bottom are always reachable. */
   .modal-back { padding: 0; align-items: flex-end; }
-  .modal { max-width: none; width: 100%; max-height: 92vh; border-radius: 16px 16px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom, 0px)); }
+  /* min-width:0 stops the sheet (a flex item) from being forced wider than the
+     screen by its content's intrinsic width (e.g. the avatar grid). */
+  .modal { max-width: none; width: 100%; min-width: 0; max-height: 92vh; border-radius: 16px 16px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom, 0px)); }
   /* iOS Safari mis-handles position:sticky/fixed INSIDE a -webkit-overflow-scrolling
      container, so the in-sheet ✕ could drift out of reach on a long sheet. Hide it
      on mobile and use .modal-x-fixed instead — a direct child of the (non-scrolling)
