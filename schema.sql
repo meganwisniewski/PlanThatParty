@@ -41,6 +41,25 @@ CREATE TABLE IF NOT EXISTS events (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Comments and attachments on tasks.
+CREATE TABLE IF NOT EXISTS task_comments (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id          INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  author_name      TEXT,
+  author_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+  body             TEXT NOT NULL,
+  created_at       TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS task_attachments (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id    INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  name       TEXT,
+  mime       TEXT,
+  url        TEXT,
+  data       TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 -- Uploaded floor-plan images.
 CREATE TABLE IF NOT EXISTS floorplans (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

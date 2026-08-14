@@ -601,8 +601,34 @@ function panel() {
         ${kids.map((k) => `<div class="subrow"><input type="checkbox" data-subcheck="${k.id}" ${k.status === "done" ? "checked" : ""}/><span class="sname ${k.status === "done" ? "done" : ""}" data-open="${k.id}">${esc(k.title)}</span><button class="btn ghost small danger" data-subdel="${k.id}">✕</button></div>`).join("")}
         <div style="display:flex;gap:6px;margin-top:8px"><input id="newSub" placeholder="Add a subtask…" style="flex:1;border:1px solid var(--line-strong);border-radius:8px;padding:7px 9px"/><button class="btn small" data-addsub="${t.id}">Add</button></div>
       </div>
-      <div style="display:flex;gap:8px;margin-top:8px"><button class="btn danger" data-deltask="${t.id}">Delete task</button></div>
+      <div class="section-title" style="margin-top:16px">Attachments</div>
+      <div id="taskAttach"><div class="meta" style="padding:4px">Loading…</div></div>
+      <div style="display:flex;gap:6px;margin-top:8px"><label class="btn small" style="cursor:pointer">📎 File<input type="file" id="taFile" accept="image/*,application/pdf" hidden/></label><button class="btn small ghost" data-add-link>🔗 Add link</button></div>
+      <div class="section-title" style="margin-top:16px">Comments</div>
+      <div id="taskComments"><div class="meta" style="padding:4px">Loading…</div></div>
+      <div style="display:flex;gap:6px;margin-top:8px"><input id="taComment" placeholder="Add a comment…" style="flex:1;border:1px solid var(--line-strong);border-radius:8px;padding:8px"/><button class="btn small" data-task-comment="${t.id}">Post</button></div>
+      <div style="display:flex;gap:8px;margin-top:16px"><button class="btn danger" data-deltask="${t.id}">Delete task</button></div>
     </div>`;
+}
+function fileToDataUrl(file) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); }); }
+async function mountTaskComments(taskId) {
+  const m = $("#taskComments"); if (!m) return;
+  let items = []; try { items = await get(`/api/tasks/${taskId}/comments`); } catch {}
+  m.innerHTML = items.length ? items.map((c) => `<div class="fbrow"><div class="fm"><div>${esc(c.body)}</div><div class="meta">${esc(c.person_name || c.author_name || "Anonymous")} · ${esc((c.created_at || "").replace("T", " ").slice(0, 16))}</div></div></div>`).join("") : `<div class="empty" style="padding:6px;font-size:13px">No comments yet.</div>`;
+}
+function attachChip(a, taskId) {
+  const isImg = (a.mime || "").startsWith("image/") && a.data;
+  if (isImg) return `<div style="position:relative"><img src="${a.data}" data-zoom="${a.data}" title="${esc(a.name || "")}" style="width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:zoom-in"/><button class="btn ghost small danger" data-del-att="${a.id}" title="Remove" style="position:absolute;top:-6px;right:-6px;border-radius:50%;width:20px;height:20px;padding:0">✕</button></div>`;
+  const href = a.url || a.data;
+  const icon = a.url ? "🔗" : (a.mime || "").includes("pdf") ? "📄" : "📎";
+  return `<span class="chip" style="display:inline-flex;align-items:center;gap:6px"><a href="${esc(href)}" target="_blank" rel="noopener noreferrer" ${a.data ? `download="${esc(a.name || "file")}"` : ""} style="color:inherit">${icon} ${esc(a.name || a.url || "file")}</a><button class="btn ghost small danger" data-del-att="${a.id}" style="padding:0 4px">✕</button></span>`;
+}
+async function mountTaskAttach(taskId) {
+  const m = $("#taskAttach"); if (!m) return;
+  let items = []; try { items = await get(`/api/tasks/${taskId}/attachments`); } catch {}
+  m.innerHTML = items.length ? `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">${items.map((a) => attachChip(a, taskId)).join("")}</div>` : `<div class="empty" style="padding:6px;font-size:13px">No attachments yet.</div>`;
+  m.querySelectorAll("[data-zoom]").forEach((im) => (im.onclick = () => openLightbox(im.dataset.zoom)));
+  m.querySelectorAll("[data-del-att]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this attachment?")) return; await del(`/api/tasks/${taskId}/attachment/${b.dataset.delAtt}`); mountTaskAttach(taskId); }));
 }
 
 /* ---------------- PEOPLE ---------------- */
@@ -973,6 +999,13 @@ function wirePanel() {
   appEl.querySelectorAll("[data-tagfilter]").forEach((b) => (b.onclick = () => { state.panelOpen = false; state.screen = "work"; state.dial = 1; state.filter = { areaId: null, saved: null, tag: b.dataset.tagfilter, q: "" }; render(); }));
   const ff = $("[data-fulfill]"); if (ff) ff.onclick = async () => { await post("/api/tasks/" + ff.dataset.fulfill + "/fulfill", { value: $("#factInput").value }); await refresh(); render(); toast("Saved ✓ — it's now everywhere"); };
   const dt = $("[data-deltask]"); if (dt) dt.onclick = async () => { if (!confirm("Delete this task?")) return; await del("/api/tasks/" + dt.dataset.deltask); state.panelOpen = false; state.selectedTaskId = null; await refresh(); render(); };
+  // task comments + attachments
+  const tid = state.selectedTaskId;
+  if (tid) { mountTaskComments(tid); mountTaskAttach(tid); }
+  const tcb = $("[data-task-comment]"); if (tcb) tcb.onclick = async () => { const el = $("#taComment"); const v = el.value.trim(); if (!v) return; await post(`/api/tasks/${tid}/comment`, { body: v, author_name: fab.dataset.name || null, author_person_id: fab.dataset.person || null }); el.value = ""; mountTaskComments(tid); };
+  const tac = $("#taComment"); if (tac) tac.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); $("[data-task-comment]").onclick(); } };
+  const taf = $("#taFile"); if (taf) taf.onchange = async () => { const f = taf.files[0]; taf.value = ""; if (!f) return; toast("Attaching…"); try { const data = f.type.startsWith("image/") ? await resizeImage(f, 1600, 0.8) : await fileToDataUrl(f); await post(`/api/tasks/${tid}/attachment`, { name: f.name, mime: f.type, data }); mountTaskAttach(tid); toast("Attached"); } catch (e) { toast(e.message || "Couldn't attach (too large?)"); } };
+  const alk = $("[data-add-link]"); if (alk) alk.onclick = async () => { const url = prompt("Paste a URL (a doc, a build, an inspo link):"); if (!url || !url.trim()) return; const name = (prompt("Label (optional):", "") || "").trim() || null; try { await post(`/api/tasks/${tid}/attachment`, { url: url.trim(), name }); mountTaskAttach(tid); toast("Link added"); } catch (e) { toast(e.message || "Error"); } };
   const addsub = $("[data-addsub]"); if (addsub) addsub.onclick = async () => { const v = $("#newSub").value.trim(); if (!v) return; const t = tasksAll().find((x) => x.id === state.selectedTaskId); await post("/api/tasks", { title: v, parent_id: t.id, area_id: t.area_id }); await refresh(); render(); };
   appEl.querySelectorAll("[data-subcheck]").forEach((c) => (c.onchange = async (e) => { await patch("/api/tasks/" + c.dataset.subcheck, { status: e.target.checked ? "done" : "todo", percent: e.target.checked ? 100 : 0 }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-subdel]").forEach((b) => (b.onclick = async () => { await del("/api/tasks/" + b.dataset.subdel); await refresh(); render(); }));

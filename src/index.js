@@ -718,6 +718,41 @@ async function api(request, env, path) {
       await env.DB.prepare("UPDATE tasks SET status = 'done', percent = 100 WHERE id = ?").bind(id).run();
       return json({ ok: true });
     }
+    // ---- task comments (host-only) ----
+    if (method === "GET" && id && seg[3] === "comments") {
+      const gate = await requireAdmin(request, env); if (gate) return gate;
+      const rows = (await env.DB.prepare("SELECT c.*, p.name AS person_name FROM task_comments c LEFT JOIN people p ON p.id = c.author_person_id WHERE c.task_id = ? ORDER BY c.created_at").bind(id).all()).results;
+      return json(rows);
+    }
+    if (method === "POST" && id && seg[3] === "comment") {
+      const gate = await requireAdmin(request, env); if (gate) return gate;
+      const b = await body(request);
+      if (!b.body || !b.body.trim()) return err("Say something.");
+      await env.DB.prepare("INSERT INTO task_comments (task_id, author_name, author_person_id, body) VALUES (?,?,?,?)").bind(id, b.author_name || null, b.author_person_id || null, b.body.trim()).run();
+      return json({ ok: true }, 201);
+    }
+    // ---- task attachments (host-only): a file (data URL) or an external link ----
+    if (method === "GET" && id && seg[3] === "attachments") {
+      const gate = await requireAdmin(request, env); if (gate) return gate;
+      const rows = (await env.DB.prepare("SELECT * FROM task_attachments WHERE task_id = ? ORDER BY created_at").bind(id).all()).results;
+      return json(rows);
+    }
+    if (method === "POST" && id && seg[3] === "attachment") {
+      const gate = await requireAdmin(request, env); if (gate) return gate;
+      const b = await body(request);
+      const link = b.url && String(b.url).trim();
+      const file = b.data && typeof b.data === "string";
+      if (!link && !file) return err("Attach a file or a link.");
+      if (file && b.data.length > 1400000) return err("File too large (max ~1MB).");
+      await env.DB.prepare("INSERT INTO task_attachments (task_id, name, mime, url, data) VALUES (?,?,?,?,?)")
+        .bind(id, b.name || null, b.mime || null, link ? normalizeUrl(b.url) : null, file ? b.data : null).run();
+      return json({ ok: true }, 201);
+    }
+    if (method === "DELETE" && id && seg[3] === "attachment" && seg[4]) {
+      const gate = await requireAdmin(request, env); if (gate) return gate;
+      await env.DB.prepare("DELETE FROM task_attachments WHERE id = ? AND task_id = ?").bind(seg[4], id).run();
+      return json({ ok: true });
+    }
     if (method === "POST") {
       const b = await body(request);
       if (!b.title) return err("Title required.");
