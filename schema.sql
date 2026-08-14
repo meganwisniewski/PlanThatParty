@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS ideas (
   admin_only          INTEGER DEFAULT 0,           -- 1 = visible to admins/approvers only
   thumb               TEXT,                        -- tiny inline preview (data URL) for cards
   tags                TEXT,                        -- free-form CSV tags (e.g. "decor spooky")
+  zone_id             INTEGER REFERENCES zones(id) ON DELETE SET NULL, -- linked house zone
   created_at          TEXT DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS idea_images (
