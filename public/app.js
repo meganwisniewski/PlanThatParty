@@ -1065,16 +1065,32 @@ async function mountIdeas() {
 }
 function drawIdeas() {
   const mount = $("#ideasmount"); if (!mount) return;
-  const view = state.ideasView || "board";
+  const view = state.ideasView || "gallery";
+  const body = view === "board" ? ideasBoard() : view === "list" ? ideasList() : ideasGallery();
   mount.innerHTML = `
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
       <div><h1 style="margin:0;font-size:18px">💡 Ideas</h1><div class="countdown">Anyone can suggest something. Ideas move Submitted → Screening → Approved, and an approved idea can be <b>promoted into a real task</b>.</div></div>
       <div class="grow"></div>
-      <div class="viewswitch">${["board", "list"].map((v) => `<button class="${view === v ? "on" : ""}" data-iview="${v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join("")}</div>
+      <div class="viewswitch">${["gallery", "board", "list"].map((v) => `<button class="${view === v ? "on" : ""}" data-iview="${v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join("")}</div>
       <button class="btn primary" data-add-idea>+ Share an idea</button>
     </div>
-    ${ideasData.length ? (view === "board" ? ideasBoard() : ideasList()) : `<div class="empty panel" style="padding:30px">No ideas yet — share the first one.</div>`}`;
+    ${ideasData.length ? body : `<div class="empty panel" style="padding:30px">No ideas yet — share the first one.</div>`}`;
   wireIdeas(mount);
+}
+// Pinterest-style masonry — photo-first, filling the page.
+function ideasGallery() {
+  const items = ideasData.slice().sort((a, b) => (b.images || 0) - (a.images || 0) || (b.votes || 0) - (a.votes || 0));
+  return `<div class="idea-masonry">${items.map(ideaPin).join("")}</div>`;
+}
+function ideaPin(i) {
+  return `<div class="ipin" data-idea="${i.id}">
+    ${i.thumb ? `<img src="${i.thumb}" loading="lazy" alt="${esc(i.title)}"/>` : ""}
+    <div class="ipin-body">
+      <div class="ipin-title">${esc(i.title)}</div>
+      ${i.tags ? `<div style="margin-top:5px">${tagChipsHtml(i.tags)}</div>` : ""}
+      <div class="ipin-meta"><span style="color:${IS_COLOR[i.stage]}">${IS_EMOJI[i.stage]}</span> · 👍 ${i.votes || 0}${i.comments ? ` · 💬 ${i.comments}` : ""}${i.images > 1 ? ` · 📷 ${i.images}` : ""}${i.admin_only ? " · 🔒" : ""}</div>
+    </div>
+  </div>`;
 }
 function ideasBoard() {
   const cols = ["submitted", "screening", "approved", "promoted"];
