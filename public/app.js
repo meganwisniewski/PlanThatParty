@@ -66,6 +66,29 @@ function googleCalUrl(party) {
   if (party.location) p.set("location", party.location);
   return "https://calendar.google.com/calendar/render?" + p.toString();
 }
+// ---- avatars (a fantasy cast: each person can wear a creature) ----
+const AVATARS = [
+  ["wizard", "🧙", "Wizard"], ["fairy", "🧚", "Fairy"], ["elf", "🧝", "Elf"], ["genie", "🧞", "Genie"],
+  ["merfolk", "🧜", "Merfolk"], ["vampire", "🧛", "Vampire"], ["zombie", "🧟", "Zombie"], ["hero", "🦸", "Hero"],
+  ["unicorn", "🦄", "Unicorn"], ["dragon", "🐉", "Dragon"], ["ogre", "👹", "Ogre"], ["goblin", "👺", "Goblin"],
+  ["ghost", "👻", "Ghost"], ["pumpkin", "🎃", "Pumpkin"], ["skull", "💀", "Skull"], ["bat", "🦇", "Bat"],
+  ["cat", "🐈‍⬛", "Black cat"], ["spider", "🕷️", "Spider"], ["owl", "🦉", "Owl"], ["wolf", "🐺", "Wolf"],
+  ["frog", "🐸", "Toad"], ["snake", "🐍", "Serpent"], ["mushroom", "🍄", "Toadstool"], ["oracle", "🔮", "Oracle"],
+];
+const AV_EMOJI = Object.fromEntries(AVATARS.map(([k, e]) => [k, e]));
+function avatarSeedHue(seed) { const s = String(seed || "?"); let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; }
+// Render a person's avatar: an uploaded image, a built-in creature tile, or a
+// colored initials fallback. size in px.
+function avatarHtml(p, size) {
+  size = size || 40;
+  const av = p && p.avatar;
+  const st = `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.5)}px`;
+  if (av && av.slice(0, 5) === "data:") return `<span class="avatar" style="${st}"><img src="${av}" alt="${esc((p && p.name) || "")}"/></span>`;
+  if (av && av.slice(0, 3) === "fx:") { const h = avatarSeedHue(av); return `<span class="avatar avatar-fx" style="${st};background:linear-gradient(135deg,hsl(${h} 72% 63%),hsl(${(h + 45) % 360} 68% 50%))">${AV_EMOJI[av.slice(3)] || "🎭"}</span>`; }
+  const initials = (String((p && p.name) || "?").trim().split(/\s+/).map((w) => w[0] || "").join("").slice(0, 2) || "?").toUpperCase();
+  const h = avatarSeedHue(p && p.name);
+  return `<span class="avatar avatar-init" style="${st};background:hsl(${h} 55% 90%);color:hsl(${h} 45% 30%)">${esc(initials)}</span>`;
+}
 // ---- events ----
 const EVENT_KINDS = [["movie", "🎬", "Movie night"], ["craft", "✂️", "Craft day"], ["pumpkin", "🎃", "Pumpkin day"], ["setup", "🔨", "Setup"], ["dayof", "🎉", "Day-of"], ["teardown", "🧹", "Tear-down"], ["other", "📌", "Other"]];
 const EK_EMOJI = Object.fromEntries(EVENT_KINDS.map(([k, e]) => [k, e]));
@@ -1040,7 +1063,7 @@ function peopleView() {
 function personCard(p) {
   const n = tasksAll().filter((t) => t.assignee_id == p.id).length;
   return `<div class="pcard">
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h3>${esc(p.name)}</h3>${p.role && p.role !== "volunteer" ? `<span class="role">${esc(p.role)}</span>` : ""}${p.is_approver ? `<span class="role" style="background:#f3efff;color:var(--accent-purple)">✓ Approver</span>` : ""}<div class="grow"></div><button class="btn ghost small" data-edit-person="${p.id}">Edit</button></div>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${avatarHtml(p, 46)}<h3>${esc(p.name)}</h3>${p.role && p.role !== "volunteer" ? `<span class="role">${esc(p.role)}</span>` : ""}${p.is_approver ? `<span class="role" style="background:#f3efff;color:var(--accent-purple)">✓ Approver</span>` : ""}<div class="grow"></div><button class="btn ghost small" data-edit-person="${p.id}">Edit</button></div>
     <div class="chan">Prefers <b>${channelLabel(p.preferred_channel)}</b>${p.platform ? ` · ${esc(PLATFORMS[p.platform] || p.platform)}` : ""}</div>
     <div style="font-size:13px;color:var(--muted)">${p.email ? `📧 ${esc(p.email)}<br>` : ""}${p.phone ? `📱 ${esc(p.phone)}<br>` : ""}${p.channel_notes ? `📝 ${esc(p.channel_notes)}` : ""}</div>
     ${p.notes ? `<div class="pnote">${esc(p.notes)}</div>` : ""}
@@ -1328,19 +1351,38 @@ function openPersonModal(id) {
   const p = id ? state.data.people.find((x) => x.id == id) : {};
   const chanOpts = Object.entries(CHANNELS).map(([v, l]) => `<option value="${v}" ${p.preferred_channel === v ? "selected" : ""}>${l}</option>`).join("");
   const platOpts = `<option value="">—</option>` + Object.entries(PLATFORMS).map(([v, l]) => `<option value="${v}" ${p.platform === v ? "selected" : ""}>${l}</option>`).join("");
+  let picked = p.avatar || null; // read by the onSave closure below
   modal(`<h3>${id ? "Edit person" : "Add person"}</h3>
     <label class="field"><span>Name</span><input id="pName" value="${esc(p.name || "")}"/></label>
+    <div class="field"><span>Avatar <span style="color:var(--faint);font-weight:400">— pick a fantasy creature or upload a photo</span></span>
+      <div class="avpicker">
+        <div class="avpreview" id="avPreview"></div>
+        <div class="avgrid">${AVATARS.map(([k, e, l]) => `<button type="button" class="avtile" data-av="fx:${k}" title="${l}">${e}</button>`).join("")}</div>
+        <div class="avactions"><label class="btn small" style="cursor:pointer">⬆ Upload photo<input type="file" id="avFile" accept="image/*" hidden/></label><button type="button" class="btn small ghost" id="avClear">Use initials</button></div>
+      </div>
+    </div>
     <div class="field two"><label><span>Email</span><input id="pEmail" value="${esc(p.email || "")}"/></label><label><span>Phone</span><input id="pPhone" value="${esc(p.phone || "")}"/></label></div>
     <div class="field two"><label><span>Preferred channel</span><select id="pChan">${chanOpts}</select></label><label><span>Their world</span><select id="pPlat">${platOpts}</select></label></div>
     <div class="field two"><label><span>Role</span><select id="pRole">${["volunteer", "lead", "co-host", "host", "PM"].map((r) => `<option value="${r}" ${p.role === r ? "selected" : ""}>${r}</option>`).join("")}</select></label><label><span>Contact notes</span><input id="pNotes" value="${esc(p.channel_notes || "")}"/></label></div>
     <label class="field"><span>Notes for co-hosts</span><textarea id="pAbout" rows="2" placeholder="What they're into, what they've offered to help with, anything handy to remember…">${esc(p.notes || "")}</textarea></label>
     <label class="field" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="pApprover" ${p.is_approver ? "checked" : ""} style="width:auto"/> <span style="margin:0">Idea approver — can moderate the ideas pipeline from their own link</span></label>`,
     async () => {
-      const payload = { name: $("#pName").value.trim(), email: $("#pEmail").value.trim() || null, phone: $("#pPhone").value.trim() || null, preferred_channel: $("#pChan").value, platform: $("#pPlat").value || null, role: $("#pRole").value, channel_notes: $("#pNotes").value.trim() || null, notes: $("#pAbout").value.trim() || null, is_approver: $("#pApprover").checked ? 1 : 0 };
+      const payload = { name: $("#pName").value.trim(), email: $("#pEmail").value.trim() || null, phone: $("#pPhone").value.trim() || null, preferred_channel: $("#pChan").value, platform: $("#pPlat").value || null, role: $("#pRole").value, channel_notes: $("#pNotes").value.trim() || null, notes: $("#pAbout").value.trim() || null, avatar: picked, is_approver: $("#pApprover").checked ? 1 : 0 };
       if (!payload.name) return toast("Add a name");
       if (id) await patch("/api/people/" + id, payload); else await post("/api/people", payload);
       await refresh(); render(); toast("Saved");
     });
+  const box = document.body.lastElementChild;
+  const drawAv = () => {
+    const nm = (box.querySelector("#pName").value || p.name);
+    box.querySelector("#avPreview").innerHTML = avatarHtml({ name: nm, avatar: picked }, 60);
+    box.querySelectorAll(".avtile").forEach((b) => b.classList.toggle("sel", b.dataset.av === picked));
+  };
+  box.querySelectorAll(".avtile").forEach((b) => (b.onclick = () => { picked = (picked === b.dataset.av) ? null : b.dataset.av; drawAv(); }));
+  box.querySelector("#avClear").onclick = () => { picked = null; drawAv(); };
+  box.querySelector("#avFile").onchange = async (e) => { const f = e.target.files[0]; e.target.value = ""; if (!f) return; try { picked = await resizeImage(f, 256, 0.82); drawAv(); toast("Avatar set"); } catch { toast("Couldn't load that image"); } };
+  box.querySelector("#pName").oninput = () => { if (!picked || picked.slice(0, 3) !== "fx:") drawAv(); };
+  drawAv();
 }
 
 /* ---------------- feedback (admin triage) ---------------- */
@@ -1689,7 +1731,7 @@ async function renderVolunteer(token) {
   window.__approverToken = d.person.is_approver ? token : null;
   const party = d.party || {};
   const when = [party.event_date ? fmtDate(party.event_date) : "", party.start_time].filter(Boolean).join(" · ");
-  appEl.innerHTML = `<div class="vol-head"><h1>🎃 ${esc(party.name || "Halloween Party")}</h1><p>Hey ${esc(d.person.name)} — here's just your part${when ? " · " + esc(when) : ""}${party.location ? " · " + esc(party.location) : ""}</p></div>
+  appEl.innerHTML = `<div class="vol-head"><div style="display:flex;align-items:center;gap:12px;justify-content:center">${avatarHtml(d.person, 52)}<h1 style="margin:0">🎃 ${esc(party.name || "Halloween Party")}</h1></div><p>Hey ${esc(d.person.name)} — here's just your part${when ? " · " + esc(when) : ""}${party.location ? " · " + esc(party.location) : ""}</p></div>
     <div class="vol-dial" id="volDialMount"></div><div class="vol-wrap">${volCalendarCard()}<div id="volBody"></div><div id="volIdeas"></div></div>`;
   mountVolDial(); drawVol(); wireVolCalendar(); mountVolIdeas();
 }

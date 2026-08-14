@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS people (
   platform          TEXT,                    -- iphone | android | google | microsoft | other
   channel_notes     TEXT,                    -- how to reach them (quiet hours, etc.)
   notes             TEXT,                    -- freeform context for co-hosts (interests, offers to help)
+  avatar            TEXT,                    -- fantasy avatar: "fx:<key>" (built-in) or a data-URL image
   role              TEXT,                    -- host | co-host | lead | volunteer
   is_approver       INTEGER DEFAULT 0,       -- can moderate the ideas pipeline from their own link
   reminder_minutes  TEXT DEFAULT '',         -- CSV of minutes-before offsets for calendar alarms (empty = none)

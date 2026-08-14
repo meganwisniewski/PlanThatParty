@@ -238,7 +238,7 @@ async function api(request, env, path) {
       ).results;
       const pc = partyClient(party);
       return json({
-        person: { id: person.id, name: person.name, role: person.role, is_approver: (person.is_approver || hostRole(person.role)) ? 1 : 0, reminder_minutes: person.reminder_minutes || "" },
+        person: { id: person.id, name: person.name, role: person.role, avatar: person.avatar || null, is_approver: (person.is_approver || hostRole(person.role)) ? 1 : 0, reminder_minutes: person.reminder_minutes || "" },
         party: party
           ? { name: pc.name, event_date: pc.event_date, start_time: pc.start_time, location: pc.location, notes: pc.notes, calStart: pc.calStart, calEnd: pc.calEnd, calAllDay: pc.calAllDay }
           : null,
@@ -715,8 +715,8 @@ async function api(request, env, path) {
       const token = newToken();
       const role = b.role || "volunteer";
       const r = await env.DB.prepare(
-        `INSERT INTO people (name, email, phone, preferred_channel, platform, channel_notes, notes, role, is_approver, share_token)
-         VALUES (?,?,?,?,?,?,?,?,?,?)`
+        `INSERT INTO people (name, email, phone, preferred_channel, platform, channel_notes, notes, avatar, role, is_approver, share_token)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`
       )
         .bind(
           b.name,
@@ -726,6 +726,7 @@ async function api(request, env, path) {
           b.platform || null,
           b.channel_notes || null,
           b.notes || null,
+          b.avatar || null,
           role,
           hostRole(role) || b.is_approver ? 1 : 0,
           token
@@ -741,7 +742,7 @@ async function api(request, env, path) {
         env,
         "people",
         id,
-        pick(b, ["name", "email", "phone", "preferred_channel", "platform", "channel_notes", "notes", "role", "is_approver", "reminder_minutes"])
+        pick(b, ["name", "email", "phone", "preferred_channel", "platform", "channel_notes", "notes", "avatar", "role", "is_approver", "reminder_minutes"])
       );
       return json({ ok: true });
     }
