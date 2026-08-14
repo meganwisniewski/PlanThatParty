@@ -980,11 +980,11 @@ function mountTagInput(root, initial, suggestions) {
 /* ---------------- modals ---------------- */
 function modal(inner, onSave) {
   const back = document.createElement("div"); back.className = "modal-back";
-  back.innerHTML = `<div class="modal">${inner}<div class="modal-actions"><button class="btn ghost" data-close>Cancel</button>${onSave ? `<button class="btn primary" data-save>Save</button>` : ""}</div></div>`;
+  back.innerHTML = `<div class="modal"><div class="modal-xrow"><button class="modal-x" data-close aria-label="Close">✕</button></div>${inner}<div class="modal-actions"><button class="btn ghost" data-close>Cancel</button>${onSave ? `<button class="btn primary" data-save>Save</button>` : ""}</div></div>`;
   document.body.appendChild(back);
   const close = () => back.remove();
   back.addEventListener("click", (e) => { if (e.target === back) close(); });
-  back.querySelector("[data-close]").onclick = close;
+  back.querySelectorAll("[data-close]").forEach((b) => (b.onclick = close));
   const sv = back.querySelector("[data-save]"); if (sv) sv.onclick = async () => { try { await onSave(); close(); } catch (e) { toast(e.message || "Error"); } };
   // Autofocus the first field on desktop; skip on touch so the on-screen
   // keyboard doesn't spring up every time a modal opens.

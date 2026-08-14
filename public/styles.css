@@ -274,6 +274,11 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .fab:hover { filter: brightness(1.08); }
 .modal-back { position: fixed; inset: 0; background: rgba(20, 16, 30, 0.4); z-index: 60; display: flex; align-items: center; justify-content: center; padding: 16px; }
 .modal { background: var(--surface); border-radius: 16px; width: 100%; max-width: 440px; padding: 22px; box-shadow: var(--shadow-panel); max-height: 90vh; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+/* Sticky ✕ pinned to the top-right of the (scrollable) modal — always reachable
+   without scrolling, the reliable way to close on touch. */
+.modal-xrow { position: sticky; top: -2px; height: 0; display: flex; justify-content: flex-end; z-index: 5; pointer-events: none; }
+.modal-x { pointer-events: auto; transform: translate(6px, -6px); width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; box-shadow: var(--shadow-card); }
+.modal-x:hover { color: var(--ink); background: var(--surface-2); }
 .modal h3 { margin: 0 0 4px; }
 .modal .hint { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
 .sentiments { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
