@@ -1313,7 +1313,10 @@ function modal(inner, onSave, opts = {}) {
   back.querySelectorAll("[data-close]").forEach((b) => (b.onclick = close));
   const mfb = back.querySelector("[data-modal-fb]");
   if (mfb) mfb.onclick = () => { const h = back.querySelector("h3"); const label = h ? h.textContent.trim() : ""; openFeedback({ target: label ? `“${label}” dialog` : "A pop-up dialog" }); };
-  const sv = back.querySelector("[data-save]"); if (sv) sv.onclick = async () => { try { await onSave(); close(); } catch (e) { toast(e.message || "Error"); } };
+  // Guard against double-submit: disable Save while onSave runs so a second tap
+  // (or a slow network + impatient re-tap) can't fire the request twice.
+  const sv = back.querySelector("[data-save]");
+  if (sv) { let saving = false; sv.onclick = async () => { if (saving) return; saving = true; sv.disabled = true; sv.style.opacity = "0.6"; try { await onSave(); close(); } catch (e) { toast(e.message || "Error"); saving = false; sv.disabled = false; sv.style.opacity = ""; } }; }
   // Autofocus the first field on desktop; skip on touch so the on-screen
   // keyboard doesn't spring up every time a modal opens.
   const f = back.querySelector("input,textarea,select");
@@ -1522,8 +1525,10 @@ function openIdeaModal(personId, personName, onDone) {
       if (!title && !descV && !linkV && !photos.length) throw new Error("Add a photo, a link, or a note first");
       const tg = $("#iTags"); const tags = tg && tg._getTags ? tg._getTags() : [];
       await post("/api/ideas", { title: title || null, description: descV || null, link: linkV || null, area_id: ($("#iArea") ? $("#iArea").value : "") || null, zone_id: ($("#iZone") ? $("#iZone").value : "") || null, submitter_person_id: personId || null, submitter_name: personId ? null : ($("#iName") ? $("#iName").value.trim() : null), thumb: photos[0] ? photos[0].thumb : null, images: photos.map((p) => p.full), admin_only: ($("#iAdminOnly") && $("#iAdminOnly").checked) ? 1 : 0, tags });
-      zonePhotos = null; // a new idea may belong to a zone — refresh that gallery next visit
-      toast("Idea shared 🎉"); if (onDone) onDone(); else await mountIdeas();
+      // The idea is saved. Everything past this point is just a refresh — never
+      // let it throw, or the modal stays open and a re-tap files a duplicate.
+      zonePhotos = null;
+      try { toast("Idea shared 🎉"); if (onDone) onDone(); else await mountIdeas(); } catch {}
     });
   const box = document.body.lastElementChild;
   mountTagInput(box.querySelector("#iTags"), [], collectIdeaTags());
