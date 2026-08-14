@@ -391,7 +391,7 @@ function topbar(party, cd) {
       ${ownerFilter()}
       ${state.view !== "board" ? `<button class="btn small ghost" data-toggle-done>${state.showDone ? "☑ Showing done" : "☐ Show done"}</button>` : ""}
       <div class="viewswitch">
-        ${["grid", "board", "calendar", "timeline"].map((v) => `<button class="${state.view === v ? "on" : ""}" data-view="${v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join("")}
+        ${["grid", "board", "calendar", "timeline", "gantt"].map((v) => `<button class="${state.view === v ? "on" : ""}" data-view="${v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join("")}
       </div>` : ""}
     </div>` : ""}
   </div>`;
@@ -411,6 +411,7 @@ function canvas() {
   if (state.view === "board") return boardView();
   if (state.view === "calendar") return calendarView();
   if (state.view === "timeline") return timelineView();
+  if (state.view === "gantt") return ganttView();
   return gridView();
 }
 
@@ -541,6 +542,68 @@ function timelineRow(t) {
       <div class="meta">${a ? `<span style="color:${areaColor(a)};font-weight:600">${a.emoji || ""} ${esc(a.name)}</span> · ` : ""}${t.assignee_name ? `🧍 ${esc(t.assignee_name)}` : `<span style="color:var(--accent-strong)">unassigned</span>`} · 📅 ${fmtDate(t.due_date) || "—"}</div></div>
     <span class="stsel st-${t.status}" style="pointer-events:none">${ST_GLYPH[t.status]} ${ST_LABEL[t.status]}</span>
   </div>`;
+}
+
+/* ---------------- GANTT (bars across a weekly time axis, grouped by area) ---------------- */
+const GANTT_BAR = { todo: "#94a3b8", claimed: "#7c3aed", in_progress: "#ea6a1e", blocked: "#dc2626", done: "#15803d" };
+function ganttView() {
+  const tasks = tasksAll().filter((t) => matchesFilter(t) && (state.showDone || t.status !== "done"));
+  const dated = tasks.filter((t) => t.due_date);
+  const noDate = tasks.filter((t) => !t.due_date);
+  const noDateBlock = noDate.length ? `<div class="section-title" style="margin-top:14px">No date yet · ${noDate.length}</div><div class="grid-wrap" style="padding:6px">${noDate.map((t) => `<div class="ev" style="margin:4px;display:inline-block" data-open="${t.id}">${esc(t.title)}</div>`).join("")}</div>` : "";
+  if (!dated.length) return `<div class="empty panel" style="margin-top:14px"><div class="big">Nothing with a due date yet.</div><div class="meta">Add due dates and they'll lay out on the gantt.</div></div>${noDateBlock}`;
+
+  const party = state.data.party || {};
+  const DAY = 86400000;
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const toD = (s) => new Date(s + "T00:00:00");
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const times = dated.map((t) => toD(t.due_date).getTime());
+  if (party.event_date) times.push(toD(party.event_date).getTime());
+  times.push(today.getTime());
+  let minD = new Date(Math.min(...times)); minD.setHours(0, 0, 0, 0);
+  minD = new Date(minD.getTime() - minD.getDay() * DAY); // back to the Sunday
+  let maxMs = Math.max(...times) + 3 * DAY;
+  // whole number of weeks across the range
+  const weeksN = Math.max(1, Math.ceil((maxMs - minD.getTime()) / (7 * DAY)));
+  const WEEK_PX = 84, NAME_PX = 168;
+  const trackW = weeksN * WEEK_PX;
+  const spanMs = weeksN * 7 * DAY;
+  const px = (ms) => ((ms - minD.getTime()) / spanMs) * trackW;
+  const weeks = []; for (let i = 0; i < weeksN; i++) weeks.push(new Date(minD.getTime() + i * 7 * DAY));
+  const todayPx = px(today.getTime());
+  const partyPx = party.event_date ? px(toD(party.event_date).getTime()) : null;
+  const markers = `${todayPx >= 0 && todayPx <= trackW ? `<div class="gmark gmark-today" style="left:${todayPx.toFixed(1)}px"></div>` : ""}${partyPx != null && partyPx >= 0 && partyPx <= trackW ? `<div class="gmark gmark-party" style="left:${partyPx.toFixed(1)}px"></div>` : ""}`;
+  const trackBg = `background-size:${WEEK_PX}px 100%;`;
+
+  const header = `<div class="gantt-row gantt-head">
+    <div class="gantt-name"></div>
+    <div class="gantt-track" style="width:${trackW}px;${trackBg}">${markers}${weeks.map((d, i) => `<span class="glabel" style="left:${(i * WEEK_PX + 4)}px">${fmtDate(ymd(d))}</span>`).join("")}${partyPx != null ? `<span class="gflag" style="left:${partyPx.toFixed(1)}px">🎃 party</span>` : ""}</div>
+  </div>`;
+
+  const bar = (t) => {
+    const due = toD(t.due_date).getTime();
+    const leadDays = t.effort_hours ? Math.max(2, Math.round(t.effort_hours / 6)) : 4;
+    const left = px(due - leadDays * DAY), right = px(due);
+    const w = Math.max(10, right - left);
+    const done = t.status === "done";
+    return `<div class="gantt-track" style="width:${trackW}px;${trackBg}">${markers}
+      <div class="gbar ${isOverdue(t) ? "overdue" : ""} ${done ? "done" : ""}" data-open="${t.id}" title="${esc(t.title)} · due ${esc(fmtDate(t.due_date))}" style="left:${Math.max(0, left).toFixed(1)}px;width:${w.toFixed(1)}px;background:${GANTT_BAR[t.status] || "#94a3b8"}"><span class="gbar-label">${esc(t.title)}</span></div>
+    </div>`;
+  };
+  const areas = state.filter.areaId ? state.data.areas.filter((a) => a.id === state.filter.areaId) : state.data.areas;
+  const groups = areas.map((a) => {
+    const list = dated.filter((t) => t.area_id === a.id).sort((x, y) => (x.due_date < y.due_date ? -1 : 1));
+    if (!list.length) return "";
+    return `<div class="gantt-group-head"><span class="dot" style="background:${areaColor(a)}"></span> ${a.emoji || ""} ${esc(a.name).toUpperCase()} <span class="gcount">${list.length}</span></div>
+      ${list.map((t) => `<div class="gantt-row"><div class="gantt-name ${t.status === "done" ? "done" : ""}" data-open="${t.id}" title="${esc(t.title)}">${esc(t.title)}</div>${bar(t)}</div>`).join("")}`;
+  }).join("");
+  const orphan = dated.filter((t) => !areas.some((a) => a.id === t.area_id));
+  const orphanBlock = orphan.length ? `<div class="gantt-group-head"><span class="dot" style="background:#94a3b8"></span> UNFILED <span class="gcount">${orphan.length}</span></div>${orphan.sort((x, y) => (x.due_date < y.due_date ? -1 : 1)).map((t) => `<div class="gantt-row"><div class="gantt-name" data-open="${t.id}">${esc(t.title)}</div>${bar(t)}</div>`).join("")}` : "";
+
+  return `<div class="gantt-legend"><span class="gl"><i style="background:${GANTT_BAR.todo}"></i>To do</span><span class="gl"><i style="background:${GANTT_BAR.claimed}"></i>Claimed</span><span class="gl"><i style="background:${GANTT_BAR.in_progress}"></i>In progress</span><span class="gl"><i style="background:${GANTT_BAR.blocked}"></i>Blocked</span><span class="gl"><i style="background:${GANTT_BAR.done}"></i>Done</span></div>
+    <div class="gantt-scroll"><div class="gantt" style="min-width:${NAME_PX + trackW}px">${header}${groups}${orphanBlock}</div></div>${noDateBlock}`;
 }
 
 /* ---------------- OVERVIEW ---------------- */
