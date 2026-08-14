@@ -304,6 +304,8 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .modal-xrow { position: sticky; top: -2px; height: 0; display: flex; justify-content: flex-end; z-index: 5; pointer-events: none; }
 .modal-x { pointer-events: auto; transform: translate(6px, -6px); width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; box-shadow: var(--shadow-card); }
 .modal-x:hover { color: var(--ink); background: var(--surface-2); }
+/* Desktop uses the inner sticky ✕; the fixed one is mobile-only (shown below). */
+.modal-x-fixed { display: none; }
 .modal h3 { margin: 0 0 4px; }
 .modal .hint { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
 .sentiments { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -335,12 +337,11 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .navtoggle { display: none; }
 .nav-backdrop { display: none; }
 
-/* Ideas gallery — Pinterest-style masonry (photo-first, fills the page). */
-.idea-masonry { column-count: 2; column-gap: 12px; }
-@media (min-width: 680px) { .idea-masonry { column-count: 3; } }
-@media (min-width: 1000px) { .idea-masonry { column-count: 4; } }
-@media (min-width: 1500px) { .idea-masonry { column-count: 5; } }
-.ipin { break-inside: avoid; -webkit-column-break-inside: avoid; margin: 0 0 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; cursor: pointer; box-shadow: var(--shadow-card); transition: transform .12s ease, box-shadow .12s ease; }
+/* Ideas gallery — masonry via round-robin columns (JS fills them so the top row
+   holds the highest-voted ideas left→right; column count set inline per width). */
+.idea-grid { display: grid; gap: 12px; align-items: start; }
+.idea-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.ipin { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; cursor: pointer; box-shadow: var(--shadow-card); transition: transform .12s ease, box-shadow .12s ease; }
 .ipin:hover { transform: translateY(-2px); box-shadow: var(--shadow-panel); }
 .ipin img { width: 100%; display: block; }
 .ipin-body { padding: 8px 11px 11px; }
@@ -415,11 +416,12 @@ button, select, input, textarea { font: inherit; color: inherit; }
      so the Save/Cancel controls at the bottom are always reachable. */
   .modal-back { padding: 0; align-items: flex-end; }
   .modal { max-width: none; width: 100%; max-height: 92vh; border-radius: 16px 16px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom, 0px)); }
-  /* iOS Safari's position:sticky is unreliable inside -webkit-overflow-scrolling
-     containers, so the sticky ✕ could scroll out of reach on a long sheet. Pin it
-     as a fixed floating button so it's ALWAYS tappable, no matter the scroll. */
-  .modal-xrow { position: static; height: auto; }
-  .modal-x { position: fixed; top: calc(10px + env(safe-area-inset-top, 0px)); right: 14px; transform: none; z-index: 80; width: 42px; height: 42px; font-size: 18px; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); box-shadow: 0 3px 12px rgba(0,0,0,.28); }
+  /* iOS Safari mis-handles position:sticky/fixed INSIDE a -webkit-overflow-scrolling
+     container, so the in-sheet ✕ could drift out of reach on a long sheet. Hide it
+     on mobile and use .modal-x-fixed instead — a direct child of the (non-scrolling)
+     backdrop, so its fixed positioning is reliable and it's ALWAYS tappable. */
+  .modal-xrow { display: none; }
+  .modal-x-fixed { display: flex; position: fixed; top: calc(10px + env(safe-area-inset-top, 0px)); right: 14px; z-index: 80; width: 44px; height: 44px; align-items: center; justify-content: center; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--surface); color: var(--ink); font-size: 18px; line-height: 1; cursor: pointer; box-shadow: 0 3px 14px rgba(0,0,0,.32); }
 }
 
 /* Touch-friendly sizing on phones / small screens. */

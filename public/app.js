@@ -1301,7 +1301,12 @@ function modal(inner, onSave, opts = {}) {
   // its own in-context feedback affordance — you can react to what you're
   // looking at (e.g. the edit-person view) without closing it first.
   const fbBtn = opts.noFeedback ? "" : `<button class="btn ghost small modal-fb" type="button" data-modal-fb>💬 Feedback</button>`;
-  back.innerHTML = `<div class="modal"><div class="modal-xrow"><button class="modal-x" data-close aria-label="Close">✕</button></div>${inner}<div class="modal-actions">${fbBtn}<button class="btn ghost" data-close>Cancel</button>${onSave ? `<button class="btn primary" data-save>Save</button>` : ""}</div></div>`;
+  // The mobile close button lives OUTSIDE the scrollable .modal (as a direct
+  // child of the fixed backdrop) — iOS Safari mis-positions position:fixed/sticky
+  // elements that live inside a -webkit-overflow-scrolling container, so a close
+  // button in the scroll flow can drift out of reach. This one can't. The inner
+  // .modal-x is kept for desktop (where sticky works fine).
+  back.innerHTML = `<button class="modal-x-fixed" data-close type="button" aria-label="Close">✕</button><div class="modal"><div class="modal-xrow"><button class="modal-x" data-close aria-label="Close">✕</button></div>${inner}<div class="modal-actions">${fbBtn}<button class="btn ghost" data-close>Cancel</button>${onSave ? `<button class="btn primary" data-save>Save</button>` : ""}</div></div>`;
   document.body.appendChild(back);
   const close = () => back.remove();
   back.addEventListener("click", (e) => { if (e.target === back) close(); });
@@ -1422,11 +1427,18 @@ function drawIdeas() {
   wireIdeas(mount);
 }
 // Pinterest-style masonry — photo-first, filling the page.
+function ideasColumnCount() { const w = window.innerWidth || 400; return w >= 1500 ? 5 : w >= 1000 ? 4 : w >= 680 ? 3 : 2; }
 function ideasGallery() {
   // Most-voted first (feedback: surface the hottest ideas at the top), then
   // most-discussed, then photo-rich pins.
   const items = ideasData.slice().sort((a, b) => (b.votes || 0) - (a.votes || 0) || (b.comments || 0) - (a.comments || 0) || (b.images || 0) - (a.images || 0));
-  return `<div class="idea-masonry">${items.map(ideaPin).join("")}</div>`;
+  // Distribute round-robin across columns so the TOP ROW holds the highest-voted
+  // ideas left→right (CSS `columns` fills each column top-to-bottom, which put
+  // low-vote ideas at the top of later columns — the reported bug).
+  const n = ideasColumnCount();
+  const cols = Array.from({ length: n }, () => []);
+  items.forEach((it, i) => cols[i % n].push(it));
+  return `<div class="idea-grid" style="grid-template-columns:repeat(${n},minmax(0,1fr))">${cols.map((c) => `<div class="idea-col">${c.map(ideaPin).join("")}</div>`).join("")}</div>`;
 }
 // A warm "hot" pill for ideas that have discussion — comments = an idea people
 // are actually talking about, so make them pop instead of hiding in grey meta.
@@ -1820,4 +1832,10 @@ function wireVolRows() {
 /* ---------------- boot ---------------- */
 fab.addEventListener("click", openFeedback);
 window.addEventListener("popstate", route);
+// Re-flow the ideas masonry when the column count would change (e.g. rotation).
+let __galleryCols = null, __resizeT = null;
+window.addEventListener("resize", () => {
+  clearTimeout(__resizeT);
+  __resizeT = setTimeout(() => { const n = ideasColumnCount(); if (n !== __galleryCols && $("#ideasmount") && ideasLoaded && (state.ideasView || "gallery") === "gallery") { __galleryCols = n; drawIdeas(); } }, 180);
+});
 route();
