@@ -642,8 +642,8 @@ async function api(request, env, path) {
       const token = newToken();
       const role = b.role || "volunteer";
       const r = await env.DB.prepare(
-        `INSERT INTO people (name, email, phone, preferred_channel, platform, channel_notes, role, is_approver, share_token)
-         VALUES (?,?,?,?,?,?,?,?,?)`
+        `INSERT INTO people (name, email, phone, preferred_channel, platform, channel_notes, notes, role, is_approver, share_token)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`
       )
         .bind(
           b.name,
@@ -652,6 +652,7 @@ async function api(request, env, path) {
           b.preferred_channel || "email",
           b.platform || null,
           b.channel_notes || null,
+          b.notes || null,
           role,
           hostRole(role) || b.is_approver ? 1 : 0,
           token
@@ -667,7 +668,7 @@ async function api(request, env, path) {
         env,
         "people",
         id,
-        pick(b, ["name", "email", "phone", "preferred_channel", "platform", "channel_notes", "role", "is_approver", "reminder_minutes"])
+        pick(b, ["name", "email", "phone", "preferred_channel", "platform", "channel_notes", "notes", "role", "is_approver", "reminder_minutes"])
       );
       return json({ ok: true });
     }

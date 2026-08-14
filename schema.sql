@@ -53,7 +53,8 @@ CREATE TABLE IF NOT EXISTS people (
   phone             TEXT,
   preferred_channel TEXT DEFAULT 'email',   -- email | sms | imessage | whatsapp | phone | in_person | calendar
   platform          TEXT,                    -- iphone | android | google | microsoft | other
-  channel_notes     TEXT,
+  channel_notes     TEXT,                    -- how to reach them (quiet hours, etc.)
+  notes             TEXT,                    -- freeform context for co-hosts (interests, offers to help)
   role              TEXT,                    -- host | co-host | lead | volunteer
   is_approver       INTEGER DEFAULT 0,       -- can moderate the ideas pipeline from their own link
   reminder_minutes  TEXT DEFAULT '',         -- CSV of minutes-before offsets for calendar alarms (empty = none)

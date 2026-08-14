@@ -758,6 +758,7 @@ function personCard(p) {
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h3>${esc(p.name)}</h3>${p.role && p.role !== "volunteer" ? `<span class="role">${esc(p.role)}</span>` : ""}${p.is_approver ? `<span class="role" style="background:#f3efff;color:var(--accent-purple)">✓ Approver</span>` : ""}<div class="grow"></div><button class="btn ghost small" data-edit-person="${p.id}">Edit</button></div>
     <div class="chan">Prefers <b>${channelLabel(p.preferred_channel)}</b>${p.platform ? ` · ${esc(PLATFORMS[p.platform] || p.platform)}` : ""}</div>
     <div style="font-size:13px;color:var(--muted)">${p.email ? `📧 ${esc(p.email)}<br>` : ""}${p.phone ? `📱 ${esc(p.phone)}<br>` : ""}${p.channel_notes ? `📝 ${esc(p.channel_notes)}` : ""}</div>
+    ${p.notes ? `<div class="pnote">${esc(p.notes)}</div>` : ""}
     <div style="margin-top:10px"><span class="chip">${n} task${n === 1 ? "" : "s"}</span></div>
     <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap"><button class="btn small" data-copy="${esc(p.share_token)}">🔗 Copy link</button><button class="btn ghost small" data-vcard="${p.id}" title="Save to your phone's contacts (iPhone & Android)">👤 Add to contacts</button><button class="btn ghost small danger" data-del-person="${p.id}">Remove</button></div>
   </div>`;
@@ -1032,9 +1033,10 @@ function openPersonModal(id) {
     <div class="field two"><label><span>Email</span><input id="pEmail" value="${esc(p.email || "")}"/></label><label><span>Phone</span><input id="pPhone" value="${esc(p.phone || "")}"/></label></div>
     <div class="field two"><label><span>Preferred channel</span><select id="pChan">${chanOpts}</select></label><label><span>Their world</span><select id="pPlat">${platOpts}</select></label></div>
     <div class="field two"><label><span>Role</span><select id="pRole">${["volunteer", "lead", "co-host", "host", "PM"].map((r) => `<option value="${r}" ${p.role === r ? "selected" : ""}>${r}</option>`).join("")}</select></label><label><span>Contact notes</span><input id="pNotes" value="${esc(p.channel_notes || "")}"/></label></div>
+    <label class="field"><span>Notes for co-hosts</span><textarea id="pAbout" rows="2" placeholder="What they're into, what they've offered to help with, anything handy to remember…">${esc(p.notes || "")}</textarea></label>
     <label class="field" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="pApprover" ${p.is_approver ? "checked" : ""} style="width:auto"/> <span style="margin:0">Idea approver — can moderate the ideas pipeline from their own link</span></label>`,
     async () => {
-      const payload = { name: $("#pName").value.trim(), email: $("#pEmail").value.trim() || null, phone: $("#pPhone").value.trim() || null, preferred_channel: $("#pChan").value, platform: $("#pPlat").value || null, role: $("#pRole").value, channel_notes: $("#pNotes").value.trim() || null, is_approver: $("#pApprover").checked ? 1 : 0 };
+      const payload = { name: $("#pName").value.trim(), email: $("#pEmail").value.trim() || null, phone: $("#pPhone").value.trim() || null, preferred_channel: $("#pChan").value, platform: $("#pPlat").value || null, role: $("#pRole").value, channel_notes: $("#pNotes").value.trim() || null, notes: $("#pAbout").value.trim() || null, is_approver: $("#pApprover").checked ? 1 : 0 };
       if (!payload.name) return toast("Add a name");
       if (id) await patch("/api/people/" + id, payload); else await post("/api/people", payload);
       await refresh(); render(); toast("Saved");
@@ -1079,16 +1081,21 @@ function drawIdeas() {
 }
 // Pinterest-style masonry — photo-first, filling the page.
 function ideasGallery() {
-  const items = ideasData.slice().sort((a, b) => (b.images || 0) - (a.images || 0) || (b.votes || 0) - (a.votes || 0));
+  // Most-voted first (feedback: surface the hottest ideas at the top), then
+  // most-discussed, then photo-rich pins.
+  const items = ideasData.slice().sort((a, b) => (b.votes || 0) - (a.votes || 0) || (b.comments || 0) - (a.comments || 0) || (b.images || 0) - (a.images || 0));
   return `<div class="idea-masonry">${items.map(ideaPin).join("")}</div>`;
 }
+// A warm "hot" pill for ideas that have discussion — comments = an idea people
+// are actually talking about, so make them pop instead of hiding in grey meta.
+function hotPill(i) { return i.comments ? `<span class="hotpill">💬 ${i.comments}</span>` : ""; }
 function ideaPin(i) {
   return `<div class="ipin" data-idea="${i.id}">
     ${i.thumb ? `<img src="${i.thumb}" loading="lazy" alt="${esc(i.title)}"/>` : ""}
     <div class="ipin-body">
       <div class="ipin-title">${esc(i.title)}</div>
       ${i.tags ? `<div style="margin-top:5px">${tagChipsHtml(i.tags)}</div>` : ""}
-      <div class="ipin-meta"><span style="color:${IS_COLOR[i.stage]}">${IS_EMOJI[i.stage]}</span> · 👍 ${i.votes || 0}${i.comments ? ` · 💬 ${i.comments}` : ""}${i.images > 1 ? ` · 📷 ${i.images}` : ""}${i.admin_only ? " · 🔒" : ""}</div>
+      <div class="ipin-meta"><span style="color:${IS_COLOR[i.stage]}">${IS_EMOJI[i.stage]}</span> · 👍 ${i.votes || 0}${i.images > 1 ? ` · 📷 ${i.images}` : ""}${i.admin_only ? " · 🔒" : ""}${i.comments ? " " + hotPill(i) : ""}</div>
     </div>
   </div>`;
 }
@@ -1106,7 +1113,8 @@ function ideasList() {
     <div class="fbrow" data-idea="${i.id}" style="cursor:pointer;align-items:center">
       <button class="btn small ghost" data-vote="${i.id}">👍 ${i.votes || 0}</button>
       <div class="fm"><div style="font-weight:600">${esc(i.title)} <span class="chip" style="color:${IS_COLOR[i.stage]}">${IS_EMOJI[i.stage]} ${IS_LABEL[i.stage]}</span></div>
-        <div class="meta">${i.area_emoji ? `${i.area_emoji} ${esc(i.area_name || "")} · ` : ""}${esc(i.submitter_person_name || i.submitter_name || "Anonymous")} · 💬 ${i.comments || 0}</div></div>
+        <div class="meta">${i.area_emoji ? `${i.area_emoji} ${esc(i.area_name || "")} · ` : ""}${esc(i.submitter_person_name || i.submitter_name || "Anonymous")}${i.comments ? "" : " · 💬 0"}</div></div>
+      ${hotPill(i)}
     </div>`).join("")}</div>`;
 }
 function ideaCard(i) {
