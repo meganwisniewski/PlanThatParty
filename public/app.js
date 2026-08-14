@@ -1079,16 +1079,20 @@ function drawIdeas() {
 }
 // Pinterest-style masonry — photo-first, filling the page.
 function ideasGallery() {
-  const items = ideasData.slice().sort((a, b) => (b.images || 0) - (a.images || 0) || (b.votes || 0) - (a.votes || 0));
+  // Most-loved first: votes, then discussion (comments), then photos.
+  const items = ideasData.slice().sort((a, b) => (b.votes || 0) - (a.votes || 0) || (b.comments || 0) - (a.comments || 0) || (b.images || 0) - (a.images || 0));
   return `<div class="idea-masonry">${items.map(ideaPin).join("")}</div>`;
+}
+function ideaStatPills(i) {
+  return `<span class="pin-stat ${i.votes ? "vote" : ""}">👍 ${i.votes || 0}</span>${i.comments ? `<span class="pin-stat hot" title="Active discussion — a hotter idea">💬 ${i.comments}</span>` : ""}${i.images > 1 ? `<span class="pin-stat">📷 ${i.images}</span>` : ""}${i.admin_only ? `<span class="pin-stat">🔒</span>` : ""}`;
 }
 function ideaPin(i) {
   return `<div class="ipin" data-idea="${i.id}">
     ${i.thumb ? `<img src="${i.thumb}" loading="lazy" alt="${esc(i.title)}"/>` : ""}
     <div class="ipin-body">
-      <div class="ipin-title">${esc(i.title)}</div>
+      <div class="ipin-title">${esc(i.title)} <span class="chip" style="color:${IS_COLOR[i.stage]};padding:1px 6px">${IS_EMOJI[i.stage]}</span></div>
       ${i.tags ? `<div style="margin-top:5px">${tagChipsHtml(i.tags)}</div>` : ""}
-      <div class="ipin-meta"><span style="color:${IS_COLOR[i.stage]}">${IS_EMOJI[i.stage]}</span> · 👍 ${i.votes || 0}${i.comments ? ` · 💬 ${i.comments}` : ""}${i.images > 1 ? ` · 📷 ${i.images}` : ""}${i.admin_only ? " · 🔒" : ""}</div>
+      <div class="ipin-meta">${ideaStatPills(i)}</div>
     </div>
   </div>`;
 }
@@ -1103,10 +1107,11 @@ function ideasBoard() {
 function ideasList() {
   const sorted = ideasData.slice().sort((a, b) => (b.votes || 0) - (a.votes || 0));
   return `<div class="grid-wrap" style="padding:6px 14px">${sorted.map((i) => `
-    <div class="fbrow" data-idea="${i.id}" style="cursor:pointer;align-items:center">
+    <div class="fbrow" data-idea="${i.id}" style="cursor:pointer;align-items:center;gap:10px">
       <button class="btn small ghost" data-vote="${i.id}">👍 ${i.votes || 0}</button>
+      ${i.thumb ? `<img src="${i.thumb}" alt="" style="width:52px;height:52px;object-fit:cover;border-radius:8px;border:1px solid var(--line);flex:none"/>` : ""}
       <div class="fm"><div style="font-weight:600">${esc(i.title)} <span class="chip" style="color:${IS_COLOR[i.stage]}">${IS_EMOJI[i.stage]} ${IS_LABEL[i.stage]}</span></div>
-        <div class="meta">${i.area_emoji ? `${i.area_emoji} ${esc(i.area_name || "")} · ` : ""}${esc(i.submitter_person_name || i.submitter_name || "Anonymous")} · 💬 ${i.comments || 0}</div></div>
+        <div class="meta">${i.area_emoji ? `${i.area_emoji} ${esc(i.area_name || "")} · ` : ""}${esc(i.submitter_person_name || i.submitter_name || "Anonymous")}${i.comments ? ` · <b style="color:#b45309">💬 ${i.comments}</b>` : ""}${i.images ? ` · 📷 ${i.images}` : ""}</div></div>
     </div>`).join("")}</div>`;
 }
 function ideaCard(i) {
