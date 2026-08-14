@@ -271,6 +271,7 @@ function render() {
   if (state.screen === "ideas") { if (ideasLoaded) drawIdeas(); else mountIdeas(); }
   else if (state.screen === "feedback") { if (fbData) drawFeedback(); else mountFeedback(); }
   else if (state.screen === "theme") { if (fpData) drawFloorplans(); else mountFloorplans(); if (zonePhotos) drawZonePhotos(); else mountZonePhotos(); }
+  if (state.panelOpen && state.selectedTaskId) { if (taskExtras.id === state.selectedTaskId && taskExtras.comments) drawTaskExtras(); else mountTaskExtras(state.selectedTaskId); }
   const c = $(".canvas"); if (c) c.scrollTop = scrollY;
 }
 
@@ -628,9 +629,67 @@ function panel() {
         ${kids.map((k) => `<div class="subrow"><input type="checkbox" data-subcheck="${k.id}" ${k.status === "done" ? "checked" : ""}/><span class="sname ${k.status === "done" ? "done" : ""}" data-open="${k.id}">${esc(k.title)}</span><button class="btn ghost small danger" data-subdel="${k.id}">✕</button></div>`).join("")}
         <div style="display:flex;gap:6px;margin-top:8px"><input id="newSub" placeholder="Add a subtask…" style="flex:1;border:1px solid var(--line-strong);border-radius:8px;padding:7px 9px"/><button class="btn small" data-addsub="${t.id}">Add</button></div>
       </div>
+      <div id="taskExtras" class="task-extras"></div>
       <div style="display:flex;gap:8px;margin-top:8px"><button class="btn danger" data-deltask="${t.id}">Delete task</button></div>
     </div>`;
 }
+/* ---- task comments + attachments (loaded lazily per selected task) ---- */
+let taskExtras = { id: null, comments: null, attachments: null };
+async function mountTaskExtras(id) {
+  const mount = $("#taskExtras"); if (!mount) return;
+  if (taskExtras.id !== id) { taskExtras = { id, comments: null, attachments: null }; mount.innerHTML = `<div class="empty" style="padding:10px;font-size:13px">Loading…</div>`; }
+  try {
+    const [c, a] = await Promise.all([get(`/api/tasks/${id}/comments`), get(`/api/tasks/${id}/attachments`)]);
+    taskExtras = { id, comments: c, attachments: a };
+  } catch { taskExtras = { id, comments: [], attachments: [] }; }
+  drawTaskExtras();
+}
+function attachmentChip(a) {
+  const isImg = (a.mime || "").startsWith("image/") || (a.data && a.data.startsWith("data:image/"));
+  if (isImg && a.data) return `<div class="att att-img"><img src="${a.data}" data-attzoom="${esc(a.data)}" alt="${esc(a.name || "")}"/><button class="att-x" data-attdel="${a.id}" title="Remove">✕</button></div>`;
+  const href = a.url || a.data || "#";
+  const icon = a.url ? "🔗" : "📄";
+  const label = a.name || a.url || "attachment";
+  return `<div class="att att-file"><a href="${esc(href)}" target="_blank" rel="noopener">${icon} ${esc(label)}</a><button class="att-x" data-attdel="${a.id}" title="Remove">✕</button></div>`;
+}
+function drawTaskExtras() {
+  const mount = $("#taskExtras"); if (!mount || taskExtras.id !== state.selectedTaskId || !taskExtras.comments) return;
+  const atts = taskExtras.attachments || [], comments = taskExtras.comments || [];
+  mount.innerHTML = `
+    <div class="section-title" style="margin-top:16px">Attachments ${atts.length ? `(${atts.length})` : ""}</div>
+    ${atts.length ? `<div class="attgrid">${atts.map(attachmentChip).join("")}</div>` : `<div class="empty" style="padding:8px;font-size:13px">No files yet — add a photo, PDF, or link.</div>`}
+    <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+      <label class="btn small" style="cursor:pointer">⬆ Upload<input type="file" id="taFile" accept="image/*,application/pdf" multiple hidden/></label>
+      <input id="taUrl" placeholder="…or paste a link" style="flex:1;min-width:140px;border:1px solid var(--line-strong);border-radius:8px;padding:7px 9px"/>
+      <button class="btn small" id="taAddUrl">Add link</button>
+    </div>
+    <div class="section-title" style="margin-top:16px">Comments ${comments.length ? `(${comments.length})` : ""}</div>
+    <div>${comments.map((c) => `<div class="fbrow"><div class="fm"><div>${esc(c.body)}</div><div class="meta">${esc(c.person_name || c.author_name || "Anonymous")} · ${esc((c.created_at || "").replace("T", " ").slice(0, 16))}</div></div></div>`).join("") || `<div class="empty" style="padding:8px;font-size:13px">No comments yet.</div>`}</div>
+    <div style="display:flex;gap:6px;margin-top:8px"><input id="taComment" placeholder="Add a comment…" style="flex:1;border:1px solid var(--line-strong);border-radius:8px;padding:8px"/><button class="btn small" id="taCommentBtn">Post</button></div>`;
+  const id = taskExtras.id;
+  mount.querySelectorAll("[data-attzoom]").forEach((im) => (im.onclick = () => openLightbox(im.dataset.attzoom)));
+  mount.querySelectorAll("[data-attdel]").forEach((b) => (b.onclick = async () => { await del(`/api/tasks/${id}/attachment/${b.dataset.attdel}`); await mountTaskExtras(id); }));
+  const file = $("#taFile"); if (file) file.onchange = async () => {
+    const files = [...file.files]; file.value = ""; if (!files.length) return;
+    toast("Uploading…");
+    for (const f of files) {
+      try {
+        const data = f.type.startsWith("image/") ? await resizeImage(f, 1600, 0.8) : await fileToDataUrl(f);
+        if (data.length > 1500000) { toast(`${f.name} is too big (max ~1.5 MB)`); continue; }
+        await post(`/api/tasks/${id}/attachment`, { name: f.name, mime: f.type || null, data });
+      } catch { toast("Couldn't add that file"); }
+    }
+    await mountTaskExtras(id); toast("Added");
+  };
+  const addUrl = async () => { const u = $("#taUrl").value.trim(); if (!u) return; await post(`/api/tasks/${id}/attachment`, { name: u, url: u }); $("#taUrl").value = ""; await mountTaskExtras(id); };
+  const au = $("#taAddUrl"); if (au) au.onclick = addUrl;
+  const tu = $("#taUrl"); if (tu) tu.onkeydown = (e) => { if (e.key === "Enter") addUrl(); };
+  const postComment = async () => { const v = $("#taComment").value.trim(); if (!v) return; await post(`/api/tasks/${id}/comment`, { body: v, author_name: fab.dataset.name || null, author_person_id: fab.dataset.person || null }); await mountTaskExtras(id); };
+  const cb = $("#taCommentBtn"); if (cb) cb.onclick = postComment;
+  const ci = $("#taComment"); if (ci) ci.onkeydown = (e) => { if (e.key === "Enter") postComment(); };
+}
+// Read any file (e.g. a PDF) as a data URL for storage.
+function fileToDataUrl(file) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); }); }
 
 /* ---------------- PEOPLE ---------------- */
 /* ---------------- CHECKLIST (private, host-only) ---------------- */

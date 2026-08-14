@@ -742,6 +742,37 @@ async function api(request, env, path) {
       await env.DB.prepare("UPDATE tasks SET status = 'done', percent = 100 WHERE id = ?").bind(id).run();
       return json({ ok: true });
     }
+    // ----- task comments -----
+    if (method === "GET" && id && seg[3] === "comments") {
+      const rows = (await env.DB.prepare(
+        `SELECT c.*, p.name AS person_name FROM task_comments c LEFT JOIN people p ON p.id = c.author_person_id WHERE c.task_id = ? ORDER BY c.created_at`
+      ).bind(id).all()).results;
+      return json(rows);
+    }
+    if (method === "POST" && id && seg[3] === "comment") {
+      const b = await body(request);
+      if (!b.body || !b.body.trim()) return err("Say something.");
+      const r = await env.DB.prepare("INSERT INTO task_comments (task_id, author_name, author_person_id, body) VALUES (?,?,?,?)").bind(id, b.author_name || null, b.author_person_id || null, b.body.trim()).run();
+      return json({ id: r.meta.last_row_id }, 201);
+    }
+    // ----- task attachments (photos, PDFs, links) -----
+    if (method === "GET" && id && seg[3] === "attachments") {
+      const rows = (await env.DB.prepare("SELECT id, task_id, name, mime, url, data, created_at FROM task_attachments WHERE task_id = ? ORDER BY id").bind(id).all()).results;
+      return json(rows);
+    }
+    if (method === "POST" && id && seg[3] === "attachment") {
+      const b = await body(request);
+      const url = b.url ? normalizeUrl(b.url) : null;
+      const data = (typeof b.data === "string" && b.data) ? b.data : null;
+      if (!url && !data) return err("Add a file or a link.");
+      if (data && data.length > 1500000) return err("File too large (max ~1.5 MB).");
+      const r = await env.DB.prepare("INSERT INTO task_attachments (task_id, name, mime, url, data) VALUES (?,?,?,?,?)").bind(id, b.name || null, b.mime || null, url, data).run();
+      return json({ id: r.meta.last_row_id }, 201);
+    }
+    if (method === "DELETE" && id && seg[3] === "attachment" && seg[4]) {
+      await env.DB.prepare("DELETE FROM task_attachments WHERE id = ? AND task_id = ?").bind(seg[4], id).run();
+      return json({ ok: true });
+    }
     if (method === "POST") {
       const b = await body(request);
       if (!b.title) return err("Title required.");
@@ -777,6 +808,8 @@ async function api(request, env, path) {
       return json({ ok: true });
     }
     if (method === "DELETE" && id) {
+      await env.DB.prepare("DELETE FROM task_comments WHERE task_id IN (SELECT id FROM tasks WHERE id = ? OR parent_id = ?)").bind(id, id).run();
+      await env.DB.prepare("DELETE FROM task_attachments WHERE task_id IN (SELECT id FROM tasks WHERE id = ? OR parent_id = ?)").bind(id, id).run();
       await env.DB.prepare("DELETE FROM tasks WHERE parent_id = ?").bind(id).run();
       await env.DB.prepare("DELETE FROM tasks WHERE id = ?").bind(id).run();
       return json({ ok: true });

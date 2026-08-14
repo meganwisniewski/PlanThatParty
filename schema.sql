@@ -152,6 +152,25 @@ CREATE TABLE IF NOT EXISTS idea_comments (
   created_at       TEXT DEFAULT (datetime('now'))
 );
 
+-- Task discussion + attachments (photos, PDFs, links) on the task detail panel.
+CREATE TABLE IF NOT EXISTS task_comments (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id          INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+  author_name      TEXT,
+  author_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+  body             TEXT NOT NULL,
+  created_at       TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS task_attachments (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id    INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+  name       TEXT,
+  mime       TEXT,                                 -- e.g. image/jpeg, application/pdf (null for links)
+  url        TEXT,                                 -- external link (null for uploaded files)
+  data       TEXT,                                 -- uploaded file as a data URL (null for links)
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 -- A private, informal guest list (host-only). The party is open — people
 -- just show up — so this is only for jotting who we're expecting.
 CREATE TABLE IF NOT EXISTS guests (
