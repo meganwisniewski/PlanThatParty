@@ -171,6 +171,19 @@ CREATE TABLE IF NOT EXISTS task_attachments (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Host mentions: when someone tags a host in a task/idea comment, a row lands
+-- here so that host sees a subtle notification banner next time they're on.
+CREATE TABLE IF NOT EXISTS mentions (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  person_id  INTEGER REFERENCES people(id) ON DELETE CASCADE,   -- who was tagged
+  kind       TEXT,                                              -- task_comment | idea_comment
+  ref_id     INTEGER,                                           -- the task/idea id
+  actor_name TEXT,                                              -- who tagged them
+  text       TEXT,                                              -- the comment text (context)
+  seen       INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 -- A private, informal guest list (host-only). The party is open — people
 -- just show up — so this is only for jotting who we're expecting.
 CREATE TABLE IF NOT EXISTS guests (

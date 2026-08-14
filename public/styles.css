@@ -350,6 +350,15 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .att-x { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%; border: none; background: #b42318; color: #fff; font-size: 11px; line-height: 1; cursor: pointer; }
 .att-file .att-x { top: 50%; right: 5px; transform: translateY(-50%); background: transparent; color: var(--muted); }
 
+/* host mentions — subtle top banner + tag chips */
+.mbanner { display: flex; align-items: center; gap: 10px; padding: 8px 16px; background: #f3efff; border-bottom: 1px solid #e2d8fb; color: var(--accent-purple); font-size: 13px; font-weight: 600; }
+.mbanner b { color: var(--accent-strong); }
+.mdot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; margin-top: 6px; align-self: flex-start; }
+.taghosts { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.taghint { font-size: 11px; color: var(--faint); }
+.taghost { cursor: pointer; border: 1px solid var(--line-strong); background: var(--surface); }
+.taghost.sel { background: #f3efff; color: var(--accent-purple); border-color: var(--accent-purple); }
+
 @media (max-width: 640px) {
   .canvas { padding: 12px; }
   /* grid becomes cards */

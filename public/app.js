@@ -140,7 +140,7 @@ function route() {
 // else gets the guest page — public info only (currently just date & time).
 async function renderRoot() {
   if (getPin()) {
-    try { state.data = await get("/api/state"); fab.hidden = false; applyHostIdentity(); render(); return; }
+    try { state.data = await get("/api/state"); fab.hidden = false; applyHostIdentity(); loadMentions().then(render); render(); return; }
     catch (e) { if (e.status === 401) clearPin(); else { appEl.innerHTML = `<div class="boot">Couldn't load: ${esc(e.message)}</div>`; return; } }
   }
   return renderGuest();
@@ -233,6 +233,16 @@ function getHostId() { try { return localStorage.getItem("hostPersonId") || ""; 
 // The planning team who can post as themselves: anyone with admin access
 // (approvers) plus hosts/co-hosts/PM roles — i.e. everyone but plain volunteers.
 function hostPeople() { return ((state.data && state.data.people) || []).filter((p) => p.is_approver || ["host", "co-host", "pm"].includes(String(p.role || "").toLowerCase())); }
+// Compact "tag a host" chip row for comment boxes — toggling a chip notifies
+// that host. You can't tag yourself. Returns "" when there's no one to tag.
+function hostTagChips() {
+  const me = getHostId();
+  const others = hostPeople().filter((p) => String(p.id) !== String(me));
+  if (!others.length) return "";
+  return `<div class="taghosts"><span class="taghint">🔔 Tag:</span>${others.map((p) => `<button type="button" class="chip taghost" data-taghost="${p.id}">${esc(p.name)}</button>`).join("")}</div>`;
+}
+function wireHostTagChips(root) { if (root) root.querySelectorAll(".taghost").forEach((b) => (b.onclick = () => b.classList.toggle("sel"))); }
+function collectTaggedHosts(root) { return root ? [...root.querySelectorAll(".taghost.sel")].map((b) => Number(b.dataset.taghost)) : []; }
 // Planning-areas nav section folds up; folded by default until the host opens it.
 function areasFolded() { try { const v = localStorage.getItem("areasFolded"); return v === null ? true : v === "1"; } catch { return true; } }
 function setAreasFolded(f) { try { localStorage.setItem("areasFolded", f ? "1" : "0"); } catch {} }
@@ -246,6 +256,38 @@ function applyHostIdentity() {
 function setHostIdentity(id) {
   try { id ? localStorage.setItem("hostPersonId", String(id)) : localStorage.removeItem("hostPersonId"); } catch {}
   applyHostIdentity();
+  loadMentions().then(render);
+}
+
+/* ---------------- host mentions / notifications ---------------- */
+let mentionsData = [];
+async function loadMentions() {
+  const pid = getHostId();
+  if (!pid) { mentionsData = []; return; }
+  try { mentionsData = await get("/api/mentions/" + pid); } catch { mentionsData = []; }
+}
+function unseenMentions() { return mentionsData.filter((m) => !m.seen); }
+function mentionBanner() {
+  const n = unseenMentions().length;
+  if (!n) return "";
+  return `<div class="mbanner"><span>🔔 You were tagged in <b>${n}</b> ${n === 1 ? "thing" : "things"}</span><div class="grow"></div><button class="btn small" data-mview>View</button><button class="btn small ghost" data-mdismiss title="Mark all read">✕</button></div>`;
+}
+async function markMentionsSeen() {
+  const pid = getHostId(); if (!pid) return;
+  try { await post("/api/mentions/" + pid + "/seen", {}); } catch {}
+  mentionsData = mentionsData.map((m) => ({ ...m, seen: 1 }));
+}
+function openMention(kind, ref) {
+  if (kind === "task_comment") { state.screen = "work"; state.dial = 1; selectTask(ref, true); }
+  else if (kind === "idea_comment") { state.screen = "ideas"; render(); (async () => { if (!ideasLoaded) { try { ideasData = await get("/api/ideas"); ideasLoaded = true; } catch {} } openIdeaDetail(ref); })(); }
+}
+function openMentionsModal() {
+  const list = mentionsData.slice();
+  const kindLabel = { task_comment: "💬 a task comment", idea_comment: "💡 an idea comment" };
+  modal(`<h3>🔔 Your mentions</h3>${list.length ? `<div>${list.map((m) => `<div class="fbrow" data-mopen="${m.kind}:${m.ref_id}" style="cursor:pointer">${m.seen ? "" : `<span class="mdot" title="new"></span>`}<div class="fm"><div>${esc(m.text || "")}</div><div class="meta">${esc(m.actor_name || "Someone")} tagged you in ${kindLabel[m.kind] || "something"} · ${esc((m.created_at || "").replace("T", " ").slice(0, 16))}</div></div></div>`).join("")}</div>` : `<div class="empty" style="padding:16px">Nothing yet — you'll see a note here when a co-host tags you.</div>`}`, null, { noFeedback: true });
+  const box = document.body.lastElementChild;
+  box.querySelectorAll("[data-mopen]").forEach((el) => (el.onclick = () => { const [kind, ref] = el.dataset.mopen.split(":"); box.remove(); openMention(kind, Number(ref)); }));
+  markMentionsSeen().then(render); // opening the list clears the badge
 }
 
 function render() {
@@ -258,6 +300,7 @@ function render() {
       ${state.navOpen ? `<div class="nav-backdrop" data-navclose></div>` : ""}
       ${sidebar()}
       <div class="main">
+        ${mentionBanner()}
         ${topbar(party, cd)}
         <div class="canvas" id="canvas">${canvas()}</div>
       </div>
@@ -665,8 +708,10 @@ function drawTaskExtras() {
     </div>
     <div class="section-title" style="margin-top:16px">Comments ${comments.length ? `(${comments.length})` : ""}</div>
     <div>${comments.map((c) => `<div class="fbrow"><div class="fm"><div>${esc(c.body)}</div><div class="meta">${esc(c.person_name || c.author_name || "Anonymous")} · ${esc((c.created_at || "").replace("T", " ").slice(0, 16))}</div></div></div>`).join("") || `<div class="empty" style="padding:8px;font-size:13px">No comments yet.</div>`}</div>
-    <div style="display:flex;gap:6px;margin-top:8px"><input id="taComment" placeholder="Add a comment…" style="flex:1;border:1px solid var(--line-strong);border-radius:8px;padding:8px"/><button class="btn small" id="taCommentBtn">Post</button></div>`;
+    <div style="display:flex;gap:6px;margin-top:8px"><input id="taComment" placeholder="Add a comment…" style="flex:1;border:1px solid var(--line-strong);border-radius:8px;padding:8px"/><button class="btn small" id="taCommentBtn">Post</button></div>
+    ${hostTagChips()}`;
   const id = taskExtras.id;
+  wireHostTagChips(mount);
   mount.querySelectorAll("[data-attzoom]").forEach((im) => (im.onclick = () => openLightbox(im.dataset.attzoom)));
   mount.querySelectorAll("[data-attdel]").forEach((b) => (b.onclick = async () => { await del(`/api/tasks/${id}/attachment/${b.dataset.attdel}`); await mountTaskExtras(id); }));
   const file = $("#taFile"); if (file) file.onchange = async () => {
@@ -684,7 +729,7 @@ function drawTaskExtras() {
   const addUrl = async () => { const u = $("#taUrl").value.trim(); if (!u) return; await post(`/api/tasks/${id}/attachment`, { name: u, url: u }); $("#taUrl").value = ""; await mountTaskExtras(id); };
   const au = $("#taAddUrl"); if (au) au.onclick = addUrl;
   const tu = $("#taUrl"); if (tu) tu.onkeydown = (e) => { if (e.key === "Enter") addUrl(); };
-  const postComment = async () => { const v = $("#taComment").value.trim(); if (!v) return; await post(`/api/tasks/${id}/comment`, { body: v, author_name: fab.dataset.name || null, author_person_id: fab.dataset.person || null }); await mountTaskExtras(id); };
+  const postComment = async () => { const v = $("#taComment").value.trim(); if (!v) return; const mention_ids = collectTaggedHosts(mount); await post(`/api/tasks/${id}/comment`, { body: v, author_name: fab.dataset.name || null, author_person_id: fab.dataset.person || null, mention_ids }); await mountTaskExtras(id); if (mention_ids.length) toast("Comment posted · host tagged"); };
   const cb = $("#taCommentBtn"); if (cb) cb.onclick = postComment;
   const ci = $("#taComment"); if (ci) ci.onkeydown = (e) => { if (e.key === "Enter") postComment(); };
 }
@@ -1031,6 +1076,8 @@ function wire() {
   const lo = $("[data-logout]"); if (lo) lo.onclick = () => { clearPin(); state.data = null; state.navOpen = false; renderGuest(); };
   const who = $("[data-whoami]"); if (who) who.onchange = () => { setHostIdentity(who.value); toast(who.value ? `Posting as ${who.options[who.selectedIndex].text}` : "Name cleared"); };
   const owf = $("[data-ownerfilter]"); if (owf) owf.onchange = () => { state.filter.assignee = owf.value || null; render(); };
+  const mv = $("[data-mview]"); if (mv) mv.onclick = openMentionsModal;
+  const md = $("[data-mdismiss]"); if (md) md.onclick = () => markMentionsSeen().then(render);
   const sc = $("[data-saved-clear]"); if (sc) sc.onclick = () => { state.filter = { areaId: null, saved: null, q: "" }; render(); };
   const nt = $("[data-navtoggle]"); if (nt) nt.onclick = () => { state.navOpen = !state.navOpen; render(); };
   appEl.querySelectorAll("[data-navclose]").forEach((b) => (b.onclick = () => { state.navOpen = false; render(); }));
@@ -1409,13 +1456,15 @@ async function openIdeaDetail(id) {
     </div>` : ""}
     <div class="section-title" style="margin-top:14px">Comments (${comments.length})</div>
     <div>${comments.map((c) => `<div class="fbrow"><div class="fm"><div>${esc(c.body)}</div><div class="meta">${esc(c.person_name || c.author_name || "Anonymous")} · ${esc((c.created_at || "").replace("T", " ").slice(0, 16))}</div></div></div>`).join("") || `<div class="empty" style="padding:8px;font-size:13px">No comments yet.</div>`}</div>
-    <div style="display:flex;gap:6px;margin-top:8px"><input id="dComment" placeholder="Add a comment…" style="flex:1;border:1px solid var(--line-strong);border-radius:8px;padding:8px"/><button class="btn small" id="dCommentBtn">Post</button></div>`,
+    <div style="display:flex;gap:6px;margin-top:8px"><input id="dComment" placeholder="Add a comment…" style="flex:1;border:1px solid var(--line-strong);border-radius:8px;padding:8px"/><button class="btn small" id="dCommentBtn">Post</button></div>
+    ${hostTagChips()}`,
     null);
   const box = document.body.lastElementChild;
   const q = (s) => box.querySelector(s);
+  wireHostTagChips(box);
   box.querySelectorAll("[data-zoom]").forEach((im) => (im.onclick = () => openLightbox(im.dataset.zoom)));
   q("#dVote").onclick = async () => { const r = await doVote(id); q("#dVote").textContent = `👍 ${r.votes}`; };
-  q("#dCommentBtn").onclick = async () => { const v = q("#dComment").value.trim(); if (!v) return; await post(`/api/ideas/${id}/comment`, { body: v, author_name: fab.dataset.name || null, author_person_id: fab.dataset.person || null }); box.remove(); ideasData = await get("/api/ideas").catch(() => ideasData); if ($("#ideasmount")) drawIdeas(); else if ($("#pubIdeas")) mountPublicIdeas(); else if ($("#volIdeas")) mountVolIdeas(); openIdeaDetail(id); };
+  q("#dCommentBtn").onclick = async () => { const v = q("#dComment").value.trim(); if (!v) return; const mention_ids = collectTaggedHosts(box); await post(`/api/ideas/${id}/comment`, { body: v, author_name: fab.dataset.name || null, author_person_id: fab.dataset.person || null, mention_ids }); box.remove(); ideasData = await get("/api/ideas").catch(() => ideasData); if ($("#ideasmount")) drawIdeas(); else if ($("#pubIdeas")) mountPublicIdeas(); else if ($("#volIdeas")) mountVolIdeas(); openIdeaDetail(id); };
   if (admin) {
     mountTagInput(q("#dTags"), String(i.tags || "").split(",").map((s) => s.trim()).filter(Boolean), collectIdeaTags());
     q("#dSave").onclick = async () => { await patch(`/api/ideas/${id}`, { stage: q("#dStage").value, area_id: q("#dArea").value || null, zone_id: q("#dZone").value || null, link: q("#dLink").value.trim() || null, impact: q("#dImpact").value ? Number(q("#dImpact").value) : null, effort: q("#dEffort").value ? Number(q("#dEffort").value) : null, decision_note: q("#dNote").value.trim() || null, admin_only: q("#dAdminOnly").checked ? 1 : 0, tags: q("#dTags")._getTags() }); zonePhotos = null; box.remove(); await mountIdeas(); toast("Saved"); };

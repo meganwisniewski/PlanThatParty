@@ -191,6 +191,16 @@ async function updateRow(env, table, id, fields) {
     .run();
 }
 
+// Create a notification row for each tagged host (best-effort; skips blanks).
+async function addMentions(env, ids, kind, refId, actorName, text) {
+  if (!Array.isArray(ids)) return;
+  for (const pid of ids) {
+    if (!pid) continue;
+    await env.DB.prepare("INSERT INTO mentions (person_id, kind, ref_id, actor_name, text) VALUES (?,?,?,?,?)")
+      .bind(pid, kind, refId, actorName || null, (text || "").slice(0, 400)).run();
+  }
+}
+
 // ---- API routing ---------------------------------------------------------
 
 async function api(request, env, path) {
@@ -415,6 +425,7 @@ async function api(request, env, path) {
       const b = await body(request);
       if (!b.body || !b.body.trim()) return err("Say something.");
       await env.DB.prepare("INSERT INTO idea_comments (idea_id, author_name, author_person_id, body) VALUES (?,?,?,?)").bind(id, b.author_name || null, b.author_person_id || null, b.body.trim()).run();
+      await addMentions(env, b.mention_ids, "idea_comment", id, b.author_name, b.body.trim());
       return json({ ok: true }, 201);
     }
     // moderation: admin PIN or an approver's token
@@ -454,6 +465,20 @@ async function api(request, env, path) {
   if (isWrite) {
     const gate = await requireAdmin(request, env);
     if (gate) return gate;
+  }
+
+  // ---------- mentions (host notifications — host-only) ----------
+  if (resource === "mentions") {
+    // GET /api/mentions/:personId — that host's notifications, unseen first.
+    if (method === "GET" && id) {
+      const rows = (await env.DB.prepare("SELECT * FROM mentions WHERE person_id = ? ORDER BY seen, created_at DESC LIMIT 50").bind(id).all()).results;
+      return json(rows);
+    }
+    // POST /api/mentions/:personId/seen — clear the badge for that host.
+    if (method === "POST" && id && seg[3] === "seen") {
+      await env.DB.prepare("UPDATE mentions SET seen = 1 WHERE person_id = ?").bind(id).run();
+      return json({ ok: true });
+    }
   }
 
   // Full dashboard snapshot
@@ -753,6 +778,7 @@ async function api(request, env, path) {
       const b = await body(request);
       if (!b.body || !b.body.trim()) return err("Say something.");
       const r = await env.DB.prepare("INSERT INTO task_comments (task_id, author_name, author_person_id, body) VALUES (?,?,?,?)").bind(id, b.author_name || null, b.author_person_id || null, b.body.trim()).run();
+      await addMentions(env, b.mention_ids, "task_comment", id, b.author_name, b.body.trim());
       return json({ id: r.meta.last_row_id }, 201);
     }
     // ----- task attachments (photos, PDFs, links) -----
