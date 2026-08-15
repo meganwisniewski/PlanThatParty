@@ -237,6 +237,9 @@ async function api(request, env, path) {
           .all()
       ).results;
       const pc = partyClient(party);
+      // Minimal roster (for @-tagging people from a comment) + this person's mentions.
+      const people = (await env.DB.prepare("SELECT id, name, avatar FROM people ORDER BY name").all()).results;
+      const mentions = (await env.DB.prepare("SELECT * FROM mentions WHERE person_id = ? ORDER BY seen, created_at DESC LIMIT 30").bind(person.id).all()).results;
       return json({
         person: { id: person.id, name: person.name, role: person.role, avatar: person.avatar || null, is_approver: (person.is_approver || hostRole(person.role)) ? 1 : 0, reminder_minutes: person.reminder_minutes || "" },
         party: party
@@ -244,7 +247,15 @@ async function api(request, env, path) {
           : null,
         tasks,
         supplies,
+        people,
+        mentions,
       });
+    }
+
+    // POST /api/me/:token/mentions/seen — clear this volunteer's notification badge.
+    if (method === "POST" && seg[3] === "mentions" && seg[4] === "seen") {
+      await env.DB.prepare("UPDATE mentions SET seen = 1 WHERE person_id = ?").bind(person.id).run();
+      return json({ ok: true });
     }
 
     // GET /api/me/:token/calendar.ics — the party + this person's due-dated tasks,

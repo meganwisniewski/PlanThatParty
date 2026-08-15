@@ -259,11 +259,17 @@ function getHostId() { try { return localStorage.getItem("hostPersonId") || ""; 
 // The planning team who can post as themselves: anyone with admin access
 // (approvers) plus hosts/co-hosts/PM roles — i.e. everyone but plain volunteers.
 function hostPeople() { return ((state.data && state.data.people) || []).filter((p) => p.is_approver || ["host", "co-host", "pm"].includes(String(p.role || "").toLowerCase())); }
-// Compact "tag a host" chip row for comment boxes — toggling a chip notifies
-// that host. You can't tag yourself. Returns "" when there's no one to tag.
+// Everyone taggable from wherever this runs (host app or a volunteer's page),
+// minus whoever "you" are.
+function taggablePeople() {
+  const src = (state.data && state.data.people) || (volCtx && volCtx.data && volCtx.data.people) || [];
+  const me = getHostId() || (volCtx && volCtx.data && volCtx.data.person && String(volCtx.data.person.id)) || "";
+  return src.filter((p) => String(p.id) !== String(me));
+}
+// Compact "tag someone" chip row for comment boxes — toggling a chip notifies
+// that person. You can't tag yourself. Returns "" when there's no one to tag.
 function hostTagChips() {
-  const me = getHostId();
-  const others = hostPeople().filter((p) => String(p.id) !== String(me));
+  const others = taggablePeople();
   if (!others.length) return "";
   return `<div class="taghosts"><span class="taghint">🔔 Tag:</span>${others.map((p) => `<button type="button" class="chip taghost" data-taghost="${p.id}">${esc(p.name)}</button>`).join("")}</div>`;
 }
@@ -1754,8 +1760,9 @@ async function renderVolunteer(token) {
   const party = d.party || {};
   const when = [party.event_date ? fmtDate(party.event_date) : "", party.start_time].filter(Boolean).join(" · ");
   appEl.innerHTML = `<div class="vol-head"><div style="display:flex;align-items:center;gap:12px;justify-content:center">${avatarHtml(d.person, 52)}<h1 style="margin:0">🎃 ${esc(party.name || "Halloween Party")}</h1></div><p>Hey ${esc(d.person.name)} — here's just your part${when ? " · " + esc(when) : ""}${party.location ? " · " + esc(party.location) : ""}</p></div>
-    <div class="vol-dial" id="volDialMount"></div><div class="vol-wrap">${volCalendarCard()}<div id="volBody"></div><div id="volIdeas"></div></div>`;
+    <div class="vol-dial" id="volDialMount"></div><div class="vol-wrap">${volMentionsCard()}${volCalendarCard()}<div id="volBody"></div><div id="volIdeas"></div></div>`;
   mountVolDial(); drawVol(); wireVolCalendar(); mountVolIdeas();
+  const vms = $("[data-vmseen]"); if (vms) vms.onclick = async () => { try { await post(`/api/me/${encodeURIComponent(token)}/mentions/seen`, {}); } catch {} (volCtx.data.mentions || []).forEach((m) => (m.seen = 1)); const el = $("#volMentions"); if (el) el.remove(); };
 }
 async function mountVolIdeas() {
   const host = $("#volIdeas"); if (!host) return;
@@ -1775,6 +1782,15 @@ async function mountVolIdeas() {
   host.querySelectorAll("[data-volstage]").forEach((sel) => (sel.onchange = async (e) => { await patch(`/api/ideas/${sel.dataset.volstage}`, { stage: e.target.value }); toast("Idea updated"); }));
 }
 
+function volMentionsCard() {
+  const ms = ((volCtx.data && volCtx.data.mentions) || []).filter((m) => !m.seen);
+  if (!ms.length) return "";
+  const kindLabel = { task_comment: "a task", idea_comment: "an idea" };
+  return `<div class="facts" id="volMentions" style="margin-top:14px;border-left:4px solid var(--accent-purple)">
+    <div style="display:flex;align-items:center;gap:8px"><h2 style="margin:0">🔔 You were tagged</h2><div class="grow"></div><button class="btn small ghost" data-vmseen>Mark read</button></div>
+    <div style="margin-top:8px">${ms.map((m) => `<div class="fbrow"><div class="fm"><div>${esc(m.text || "")}</div><div class="meta">${esc(m.actor_name || "Someone")} tagged you in ${kindLabel[m.kind] || "something"} · ${esc((m.created_at || "").replace("T", " ").slice(0, 16))}</div></div></div>`).join("")}</div>
+  </div>`;
+}
 function volCalendarCard() {
   const d = volCtx.data, party = d.party || {};
   if (!party.event_date) return "";
