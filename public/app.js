@@ -76,14 +76,18 @@ const AVATARS = [
   ["frog", "🐸", "Toad"], ["snake", "🐍", "Serpent"], ["mushroom", "🍄", "Toadstool"], ["oracle", "🔮", "Oracle"],
 ];
 const AV_EMOJI = Object.fromEntries(AVATARS.map(([k, e]) => [k, e]));
+// Hand-drawn medieval-manuscript creatures served from /avatars/av01.png … The
+// featured avatar set (emoji `fx:` still render for anyone who picked one).
+const AVATAR_IMGS = Array.from({ length: 32 }, (_, i) => "av" + String(i + 1).padStart(2, "0"));
 function avatarSeedHue(seed) { const s = String(seed || "?"); let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; }
-// Render a person's avatar: an uploaded image, a built-in creature tile, or a
+// Render a person's avatar: an uploaded image, a built-in creature, or a
 // colored initials fallback. size in px.
 function avatarHtml(p, size) {
   size = size || 40;
   const av = p && p.avatar;
   const st = `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.5)}px`;
   if (av && av.slice(0, 5) === "data:") return `<span class="avatar" style="${st}"><img src="${av}" alt="${esc((p && p.name) || "")}"/></span>`;
+  if (av && av.slice(0, 4) === "img:" && /^[a-z0-9_]+$/i.test(av.slice(4))) return `<span class="avatar avatar-img" style="${st}"><img src="/avatars/${av.slice(4)}.png" loading="lazy" alt="${esc((p && p.name) || "")}"/></span>`;
   if (av && av.slice(0, 3) === "fx:") { const h = avatarSeedHue(av); return `<span class="avatar avatar-fx" style="${st};background:linear-gradient(135deg,hsl(${h} 72% 63%),hsl(${(h + 45) % 360} 68% 50%))">${AV_EMOJI[av.slice(3)] || "🎭"}</span>`; }
   const initials = (String((p && p.name) || "?").trim().split(/\s+/).map((w) => w[0] || "").join("").slice(0, 2) || "?").toUpperCase();
   const h = avatarSeedHue(p && p.name);
@@ -1483,7 +1487,7 @@ function openPersonModal(id) {
     <div class="field"><span>Avatar <span style="color:var(--faint);font-weight:400">— pick a fantasy creature or upload a photo</span></span>
       <div class="avpicker">
         <div class="avpreview" id="avPreview"></div>
-        <div class="avgrid">${AVATARS.map(([k, e, l]) => `<button type="button" class="avtile" data-av="fx:${k}" title="${l}">${e}</button>`).join("")}</div>
+        <div class="avgrid avgrid-img">${AVATAR_IMGS.map((k) => `<button type="button" class="avtile avtile-img" data-av="img:${k}"><img src="/avatars/${k}.png" loading="lazy" alt=""/></button>`).join("")}</div>
         <div class="avactions"><label class="btn small" style="cursor:pointer">⬆ Upload photo<input type="file" id="avFile" accept="image/*" hidden/></label><button type="button" class="btn small ghost" id="avClear">Use initials</button></div>
       </div>
     </div>
