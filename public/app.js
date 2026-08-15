@@ -115,6 +115,9 @@ const IS_LABEL = { submitted: "Submitted", screening: "Screening", approved: "Ap
 const IS_EMOJI = { submitted: "💡", screening: "🔍", approved: "✅", promoted: "🎯", declined: "🚫", parked: "🅿️" };
 const IS_COLOR = { submitted: "#b45309", screening: "#1d4ed8", approved: "#15803d", promoted: "#7c3aed", declined: "#b42318", parked: "#5c6470" };
 function voterKey() { let k = localStorage.getItem("ptp_voter"); if (!k) { k = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)); localStorage.setItem("ptp_voter", k); } return k; }
+// A fresh idempotency token per create form, so a double-tap/retry that reaches
+// the server twice is de-duplicated into one row (see the API's client_token).
+function newClientToken() { return crypto.randomUUID ? crypto.randomUUID() : (Date.now() + "-" + Math.random().toString(36).slice(2)); }
 let ideasData = [];
 let ideasLoaded = false; // have we fetched ideas at least once (so render can redraw from cache)?
 let fbData = null;       // cached feedback list, so a re-render doesn't wipe it back to "Loading…"
@@ -1360,6 +1363,7 @@ function openPersonModal(id) {
   const chanOpts = Object.entries(CHANNELS).map(([v, l]) => `<option value="${v}" ${p.preferred_channel === v ? "selected" : ""}>${l}</option>`).join("");
   const platOpts = `<option value="">—</option>` + Object.entries(PLATFORMS).map(([v, l]) => `<option value="${v}" ${p.platform === v ? "selected" : ""}>${l}</option>`).join("");
   let picked = p.avatar || null; // read by the onSave closure below
+  const submitToken = newClientToken(); // idempotency: dedupes a double-submit when adding
   modal(`<h3>${id ? "Edit person" : "Add person"}</h3>
     <label class="field"><span>Name</span><input id="pName" value="${esc(p.name || "")}"/></label>
     <div class="field"><span>Avatar <span style="color:var(--faint);font-weight:400">— pick a fantasy creature or upload a photo</span></span>
@@ -1377,7 +1381,7 @@ function openPersonModal(id) {
     async () => {
       const payload = { name: $("#pName").value.trim(), email: $("#pEmail").value.trim() || null, phone: $("#pPhone").value.trim() || null, preferred_channel: $("#pChan").value, platform: $("#pPlat").value || null, role: $("#pRole").value, channel_notes: $("#pNotes").value.trim() || null, notes: $("#pAbout").value.trim() || null, avatar: picked, is_approver: $("#pApprover").checked ? 1 : 0 };
       if (!payload.name) return toast("Add a name");
-      if (id) await patch("/api/people/" + id, payload); else await post("/api/people", payload);
+      if (id) await patch("/api/people/" + id, payload); else await post("/api/people", { ...payload, client_token: submitToken });
       await refresh(); render(); toast("Saved");
     });
   const box = document.body.lastElementChild;
@@ -1505,6 +1509,7 @@ function wireIdeas(mount) {
 }
 function openIdeaModal(personId, personName, onDone) {
   let photos = [];
+  const submitToken = newClientToken(); // idempotency: dedupes a double-submit of THIS form
   const areasSrc = (state.data ? state.data.areas : (volCtx.data && volCtx.data.areas)) || [];
   const areaOpts = `<option value="">— area (optional) —</option>` + areasSrc.map((a) => `<option value="${a.id}">${a.emoji || ""} ${esc(a.name)}</option>`).join("");
   const hasAreas = areasSrc.length > 0;
@@ -1524,7 +1529,7 @@ function openIdeaModal(personId, personName, onDone) {
       const descV = $("#iDesc").value.trim(), linkV = $("#iLink").value.trim();
       if (!title && !descV && !linkV && !photos.length) throw new Error("Add a photo, a link, or a note first");
       const tg = $("#iTags"); const tags = tg && tg._getTags ? tg._getTags() : [];
-      await post("/api/ideas", { title: title || null, description: descV || null, link: linkV || null, area_id: ($("#iArea") ? $("#iArea").value : "") || null, zone_id: ($("#iZone") ? $("#iZone").value : "") || null, submitter_person_id: personId || null, submitter_name: personId ? null : ($("#iName") ? $("#iName").value.trim() : null), thumb: photos[0] ? photos[0].thumb : null, images: photos.map((p) => p.full), admin_only: ($("#iAdminOnly") && $("#iAdminOnly").checked) ? 1 : 0, tags });
+      await post("/api/ideas", { title: title || null, description: descV || null, link: linkV || null, area_id: ($("#iArea") ? $("#iArea").value : "") || null, zone_id: ($("#iZone") ? $("#iZone").value : "") || null, submitter_person_id: personId || null, submitter_name: personId ? null : ($("#iName") ? $("#iName").value.trim() : null), thumb: photos[0] ? photos[0].thumb : null, images: photos.map((p) => p.full), admin_only: ($("#iAdminOnly") && $("#iAdminOnly").checked) ? 1 : 0, tags, client_token: submitToken });
       // The idea is saved. Everything past this point is just a refresh — never
       // let it throw, or the modal stays open and a re-tap files a duplicate.
       zonePhotos = null;

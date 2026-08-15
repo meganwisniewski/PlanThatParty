@@ -405,10 +405,21 @@ async function api(request, env, path) {
       const finalTitle = title || (hasPhoto ? "Photo idea" : link ? "Shared link" : "Untitled idea");
       // Only an admin/approver may file an idea as host-only.
       const adminOnly = b.admin_only && (await isApprover(request, env)) ? 1 : 0;
-      const r = await env.DB.prepare(
-        `INSERT INTO ideas (title, description, link, submitter_name, submitter_person_id, area_id, zone_id, category, thumb, admin_only, tags) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
-      ).bind(finalTitle, b.description || null, link, b.submitter_name || null, b.submitter_person_id || null, b.area_id || null, b.zone_id || null, b.category || null, b.thumb || null, adminOnly, normalizeTags(b.tags)).run();
-      const ideaId = r.meta.last_row_id;
+      // Idempotency: a repeated submit carries the same client_token, so a
+      // double-tap / retry returns the first idea instead of creating a second.
+      const token = b.client_token || null;
+      if (token) { const dup = await env.DB.prepare("SELECT id FROM ideas WHERE client_token = ?").bind(token).first(); if (dup) return json({ id: dup.id, duplicate: true }); }
+      let ideaId;
+      try {
+        const r = await env.DB.prepare(
+          `INSERT INTO ideas (title, description, link, submitter_name, submitter_person_id, area_id, zone_id, category, thumb, admin_only, tags, client_token) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+        ).bind(finalTitle, b.description || null, link, b.submitter_name || null, b.submitter_person_id || null, b.area_id || null, b.zone_id || null, b.category || null, b.thumb || null, adminOnly, normalizeTags(b.tags), token).run();
+        ideaId = r.meta.last_row_id;
+      } catch (e) {
+        // Concurrent double-submit lost the race to the unique index — return the winner.
+        if (token && /UNIQUE|constraint/i.test(String(e && e.message))) { const dup = await env.DB.prepare("SELECT id FROM ideas WHERE client_token = ?").bind(token).first(); if (dup) return json({ id: dup.id, duplicate: true }); }
+        throw e;
+      }
       if (Array.isArray(b.images)) { for (const img of b.images.slice(0, 6)) { if (typeof img === "string" && img.length < 900000) await env.DB.prepare("INSERT INTO idea_images (idea_id, data) VALUES (?,?)").bind(ideaId, img).run(); } }
       return json({ id: ideaId }, 201);
     }
@@ -712,27 +723,37 @@ async function api(request, env, path) {
     if (method === "POST") {
       const b = await body(request);
       if (!b.name) return err("Name required.");
+      // Idempotency: a repeated submit (double-tap / retry) carries the same
+      // client_token and returns the first person instead of adding a twin.
+      const ct = b.client_token || null;
+      if (ct) { const dup = await env.DB.prepare("SELECT id, share_token FROM people WHERE client_token = ?").bind(ct).first(); if (dup) return json({ id: dup.id, share_token: dup.share_token, duplicate: true }); }
       const token = newToken();
       const role = b.role || "volunteer";
-      const r = await env.DB.prepare(
-        `INSERT INTO people (name, email, phone, preferred_channel, platform, channel_notes, notes, avatar, role, is_approver, share_token)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`
-      )
-        .bind(
-          b.name,
-          b.email || null,
-          b.phone || null,
-          b.preferred_channel || "email",
-          b.platform || null,
-          b.channel_notes || null,
-          b.notes || null,
-          b.avatar || null,
-          role,
-          hostRole(role) || b.is_approver ? 1 : 0,
-          token
+      try {
+        const r = await env.DB.prepare(
+          `INSERT INTO people (name, email, phone, preferred_channel, platform, channel_notes, notes, avatar, role, is_approver, share_token, client_token)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
         )
-        .run();
-      return json({ id: r.meta.last_row_id, share_token: token }, 201);
+          .bind(
+            b.name,
+            b.email || null,
+            b.phone || null,
+            b.preferred_channel || "email",
+            b.platform || null,
+            b.channel_notes || null,
+            b.notes || null,
+            b.avatar || null,
+            role,
+            hostRole(role) || b.is_approver ? 1 : 0,
+            token,
+            ct
+          )
+          .run();
+        return json({ id: r.meta.last_row_id, share_token: token }, 201);
+      } catch (e) {
+        if (ct && /UNIQUE|constraint/i.test(String(e && e.message))) { const dup = await env.DB.prepare("SELECT id, share_token FROM people WHERE client_token = ?").bind(ct).first(); if (dup) return json({ id: dup.id, share_token: dup.share_token, duplicate: true }); }
+        throw e;
+      }
     }
     if (method === "PATCH" && id) {
       const b = await body(request);

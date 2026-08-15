@@ -71,12 +71,14 @@ CREATE TABLE IF NOT EXISTS people (
   channel_notes     TEXT,                    -- how to reach them (quiet hours, etc.)
   notes             TEXT,                    -- freeform context for co-hosts (interests, offers to help)
   avatar            TEXT,                    -- fantasy avatar: "fx:<key>" (built-in) or a data-URL image
+  client_token      TEXT,                    -- idempotency key: dedupes a double-submit on add
   role              TEXT,                    -- host | co-host | lead | volunteer
   is_approver       INTEGER DEFAULT 0,       -- can moderate the ideas pipeline from their own link
   reminder_minutes  TEXT DEFAULT '',         -- CSV of minutes-before offsets for calendar alarms (empty = none)
   share_token       TEXT UNIQUE,
   created_at        TEXT DEFAULT (datetime('now'))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_people_token ON people(client_token) WHERE client_token IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS tasks (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -129,8 +131,10 @@ CREATE TABLE IF NOT EXISTS ideas (
   admin_only          INTEGER DEFAULT 0,           -- 1 = visible to admins/approvers only
   thumb               TEXT,                        -- tiny inline preview (data URL) for cards
   tags                TEXT,                        -- free-form CSV tags (e.g. "decor spooky")
+  client_token        TEXT,                        -- idempotency key: dedupes a double-submit on add
   created_at          TEXT DEFAULT (datetime('now'))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ideas_token ON ideas(client_token) WHERE client_token IS NOT NULL;
 CREATE TABLE IF NOT EXISTS idea_images (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   idea_id    INTEGER REFERENCES ideas(id) ON DELETE CASCADE,
