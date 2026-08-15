@@ -266,15 +266,65 @@ function taggablePeople() {
   const me = getHostId() || (volCtx && volCtx.data && volCtx.data.person && String(volCtx.data.person.id)) || "";
   return src.filter((p) => String(p.id) !== String(me));
 }
-// Compact "tag someone" chip row for comment boxes — toggling a chip notifies
-// that person. You can't tag yourself. Returns "" when there's no one to tag.
-function hostTagChips() {
-  const others = taggablePeople();
-  if (!others.length) return "";
-  return `<div class="taghosts"><span class="taghint">🔔 Tag:</span>${others.map((p) => `<button type="button" class="chip taghost" data-taghost="${p.id}">${esc(p.name)}</button>`).join("")}</div>`;
+// A small hint shown under comment boxes that support @-tagging.
+function tagHint() { return taggablePeople().length ? `<div class="taghint">🔔 Type <b>@</b> to tag someone</div>` : ""; }
+// The person ids referenced by "@Full Name" inside a comment — the source of
+// truth for who gets notified (so editing/removing an @mention just works).
+function collectMentions(text) {
+  const t = String(text || "");
+  return taggablePeople().filter((p) => p.name && t.includes("@" + p.name)).map((p) => Number(p.id));
 }
-function wireHostTagChips(root) { if (root) root.querySelectorAll(".taghost").forEach((b) => (b.onclick = () => b.classList.toggle("sel"))); }
-function collectTaggedHosts(root) { return root ? [...root.querySelectorAll(".taghost.sel")].map((b) => Number(b.dataset.taghost)) : []; }
+// Wire @-mention autocomplete onto a comment <input>. Typing "@han" pops a
+// name picker; choosing one inserts "@Hannah Berman ". Must be attached BEFORE
+// any Enter-to-post handler so it can swallow Enter while the menu is open.
+function attachMentionAutocomplete(input) {
+  if (!input || input._mentionWired) return;
+  if (!taggablePeople().length) return;
+  input._mentionWired = true;
+  let menu = null, items = [], active = 0;
+  const close = () => { if (menu) menu.remove(); menu = null; items = []; active = 0; };
+  const ctx = () => {
+    const pos = input.selectionStart || 0;
+    const before = input.value.slice(0, pos);
+    const at = before.lastIndexOf("@");
+    if (at < 0) return null;
+    if (at > 0 && !/\s/.test(before[at - 1])) return null; // @ must start a word
+    const q = before.slice(at + 1);
+    if (/[@\n]/.test(q)) return null;
+    return { at, q };
+  };
+  const render = () => {
+    const c = ctx(); if (!c) return close();
+    const ql = c.q.toLowerCase();
+    items = taggablePeople().filter((p) => p.name.toLowerCase().startsWith(ql)).slice(0, 8);
+    if (!items.length) return close();
+    if (active >= items.length) active = 0;
+    if (!menu) { menu = document.createElement("div"); menu.className = "mention-menu"; document.body.appendChild(menu); }
+    const r = input.getBoundingClientRect();
+    menu.style.left = Math.round(r.left) + "px"; menu.style.top = Math.round(r.bottom + 4) + "px"; menu.style.width = Math.round(Math.max(200, r.width)) + "px";
+    menu.innerHTML = items.map((p, i) => `<div class="mention-opt ${i === active ? "on" : ""}" data-i="${i}">${avatarHtml(p, 24)}<span>${esc(p.name)}</span></div>`).join("");
+    menu.querySelectorAll(".mention-opt").forEach((el) => (el.onmousedown = (e) => { e.preventDefault(); choose(Number(el.dataset.i)); }));
+  };
+  const choose = (i) => {
+    const c = ctx(); if (!c || !items[i]) return;
+    const pos = input.selectionStart || 0;
+    const before = input.value.slice(0, c.at), after = input.value.slice(pos);
+    const insert = "@" + items[i].name + " ";
+    input.value = before + insert + after;
+    const np = (before + insert).length;
+    try { input.setSelectionRange(np, np); } catch {}
+    input.focus(); close();
+  };
+  input.addEventListener("input", render);
+  input.addEventListener("keydown", (e) => {
+    if (!menu) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); e.stopImmediatePropagation(); active = (active + 1) % items.length; render(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); e.stopImmediatePropagation(); active = (active - 1 + items.length) % items.length; render(); }
+    else if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); e.stopImmediatePropagation(); choose(active); }
+    else if (e.key === "Escape") { e.stopImmediatePropagation(); close(); }
+  });
+  input.addEventListener("blur", () => setTimeout(close, 160));
+}
 // Planning-areas nav section folds up; folded by default until the host opens it.
 function areasFolded() { try { const v = localStorage.getItem("areasFolded"); return v === null ? true : v === "1"; } catch { return true; } }
 function setAreasFolded(f) { try { localStorage.setItem("areasFolded", f ? "1" : "0"); } catch {} }
@@ -805,10 +855,10 @@ function drawTaskExtras() {
     </div>
     <div class="section-title" style="margin-top:16px">Comments ${comments.length ? `(${comments.length})` : ""}</div>
     <div>${comments.map((c) => `<div class="fbrow"><div class="fm"><div>${esc(c.body)}</div><div class="meta">${esc(c.person_name || c.author_name || "Anonymous")} · ${esc((c.created_at || "").replace("T", " ").slice(0, 16))}</div></div></div>`).join("") || `<div class="empty" style="padding:8px;font-size:13px">No comments yet.</div>`}</div>
-    <div style="display:flex;gap:6px;margin-top:8px"><input id="taComment" placeholder="Add a comment…" style="flex:1;border:1px solid var(--line-strong);border-radius:8px;padding:8px"/><button class="btn small" id="taCommentBtn">Post</button></div>
-    ${hostTagChips()}`;
+    <div style="display:flex;gap:6px;margin-top:8px"><input id="taComment" placeholder="Add a comment…" autocomplete="off" style="flex:1;border:1px solid var(--line-strong);border-radius:8px;padding:8px"/><button class="btn small" id="taCommentBtn">Post</button></div>
+    ${tagHint()}`;
   const id = taskExtras.id;
-  wireHostTagChips(mount);
+  attachMentionAutocomplete($("#taComment"));
   mount.querySelectorAll("[data-attzoom]").forEach((im) => (im.onclick = () => openLightbox(im.dataset.attzoom)));
   mount.querySelectorAll("[data-attdel]").forEach((b) => (b.onclick = async () => { await del(`/api/tasks/${id}/attachment/${b.dataset.attdel}`); await mountTaskExtras(id); }));
   const file = $("#taFile"); if (file) file.onchange = async () => {
@@ -826,7 +876,7 @@ function drawTaskExtras() {
   const addUrl = async () => { const u = $("#taUrl").value.trim(); if (!u) return; await post(`/api/tasks/${id}/attachment`, { name: u, url: u }); $("#taUrl").value = ""; await mountTaskExtras(id); };
   const au = $("#taAddUrl"); if (au) au.onclick = addUrl;
   const tu = $("#taUrl"); if (tu) tu.onkeydown = (e) => { if (e.key === "Enter") addUrl(); };
-  const postComment = async () => { const v = $("#taComment").value.trim(); if (!v) return; const mention_ids = collectTaggedHosts(mount); await post(`/api/tasks/${id}/comment`, { body: v, author_name: fab.dataset.name || null, author_person_id: fab.dataset.person || null, mention_ids }); await mountTaskExtras(id); if (mention_ids.length) toast("Comment posted · host tagged"); };
+  const postComment = async () => { const v = $("#taComment").value.trim(); if (!v) return; const mention_ids = collectMentions(v); await post(`/api/tasks/${id}/comment`, { body: v, author_name: fab.dataset.name || null, author_person_id: fab.dataset.person || null, mention_ids }); await mountTaskExtras(id); if (mention_ids.length) toast(`Comment posted · ${mention_ids.length} tagged`); };
   const cb = $("#taCommentBtn"); if (cb) cb.onclick = postComment;
   const ci = $("#taComment"); if (ci) ci.onkeydown = (e) => { if (e.key === "Enter") postComment(); };
 }
@@ -1647,15 +1697,15 @@ async function openIdeaDetail(id) {
     </div>` : ""}
     <div class="section-title" style="margin-top:14px">Comments (${comments.length})</div>
     <div>${comments.map((c) => `<div class="fbrow"><div class="fm"><div>${esc(c.body)}</div><div class="meta">${esc(c.person_name || c.author_name || "Anonymous")} · ${esc((c.created_at || "").replace("T", " ").slice(0, 16))}</div></div></div>`).join("") || `<div class="empty" style="padding:8px;font-size:13px">No comments yet.</div>`}</div>
-    <div style="display:flex;gap:6px;margin-top:8px"><input id="dComment" placeholder="Add a comment…" style="flex:1;border:1px solid var(--line-strong);border-radius:8px;padding:8px"/><button class="btn small" id="dCommentBtn">Post</button></div>
-    ${hostTagChips()}`,
+    <div style="display:flex;gap:6px;margin-top:8px"><input id="dComment" placeholder="Add a comment…" autocomplete="off" style="flex:1;border:1px solid var(--line-strong);border-radius:8px;padding:8px"/><button class="btn small" id="dCommentBtn">Post</button></div>
+    ${tagHint()}`,
     null);
   const box = document.body.lastElementChild;
   const q = (s) => box.querySelector(s);
-  wireHostTagChips(box);
+  attachMentionAutocomplete(q("#dComment"));
   box.querySelectorAll("[data-zoom]").forEach((im) => (im.onclick = () => openLightbox(im.dataset.zoom)));
   q("#dVote").onclick = async () => { const r = await doVote(id); q("#dVote").textContent = `👍 ${r.votes}`; };
-  q("#dCommentBtn").onclick = async () => { const v = q("#dComment").value.trim(); if (!v) return; const mention_ids = collectTaggedHosts(box); await post(`/api/ideas/${id}/comment`, { body: v, author_name: fab.dataset.name || null, author_person_id: fab.dataset.person || null, mention_ids }); box.remove(); ideasData = await get("/api/ideas").catch(() => ideasData); if ($("#ideasmount")) drawIdeas(); else if ($("#pubIdeas")) mountPublicIdeas(); else if ($("#volIdeas")) mountVolIdeas(); openIdeaDetail(id); };
+  q("#dCommentBtn").onclick = async () => { const v = q("#dComment").value.trim(); if (!v) return; const mention_ids = collectMentions(v); await post(`/api/ideas/${id}/comment`, { body: v, author_name: fab.dataset.name || null, author_person_id: fab.dataset.person || null, mention_ids }); box.remove(); ideasData = await get("/api/ideas").catch(() => ideasData); if ($("#ideasmount")) drawIdeas(); else if ($("#pubIdeas")) mountPublicIdeas(); else if ($("#volIdeas")) mountVolIdeas(); openIdeaDetail(id); };
   if (admin) {
     mountTagInput(q("#dTags"), String(i.tags || "").split(",").map((s) => s.trim()).filter(Boolean), collectIdeaTags());
     q("#dSave").onclick = async () => { await patch(`/api/ideas/${id}`, { stage: q("#dStage").value, area_id: q("#dArea").value || null, zone_id: q("#dZone").value || null, link: q("#dLink").value.trim() || null, impact: q("#dImpact").value ? Number(q("#dImpact").value) : null, effort: q("#dEffort").value ? Number(q("#dEffort").value) : null, decision_note: q("#dNote").value.trim() || null, admin_only: q("#dAdminOnly").checked ? 1 : 0, tags: q("#dTags")._getTags() }); zonePhotos = null; box.remove(); await mountIdeas(); toast("Saved"); };
