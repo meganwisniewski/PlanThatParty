@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS supplies (
   status         TEXT DEFAULT 'needed',      -- needed | claimed | purchased
   assignee_id    INTEGER REFERENCES people(id) ON DELETE SET NULL,
   notes          TEXT,
+  link           TEXT,                       -- where to source it (a shop/product URL)
   created_at     TEXT DEFAULT (datetime('now'))
 );
 

@@ -881,8 +881,8 @@ async function api(request, env, path) {
       const b = await body(request);
       if (!b.item) return err("Item required.");
       const r = await env.DB.prepare(
-        `INSERT INTO supplies (area_id, item, quantity, estimated_cost, status, assignee_id, notes)
-         VALUES (?,?,?,?,?,?,?)`
+        `INSERT INTO supplies (area_id, item, quantity, estimated_cost, status, assignee_id, notes, link)
+         VALUES (?,?,?,?,?,?,?,?)`
       )
         .bind(
           b.area_id || null,
@@ -891,18 +891,20 @@ async function api(request, env, path) {
           b.estimated_cost != null ? b.estimated_cost : null,
           b.status || "needed",
           b.assignee_id || null,
-          b.notes || null
+          b.notes || null,
+          b.link ? normalizeUrl(b.link) : null
         )
         .run();
       return json({ id: r.meta.last_row_id }, 201);
     }
     if (method === "PATCH" && id) {
       const b = await body(request);
+      if ("link" in b) b.link = b.link ? normalizeUrl(b.link) : null;
       await updateRow(
         env,
         "supplies",
         id,
-        pick(b, ["area_id", "item", "quantity", "estimated_cost", "status", "assignee_id", "notes"])
+        pick(b, ["area_id", "item", "quantity", "estimated_cost", "status", "assignee_id", "notes", "link"])
       );
       return json({ ok: true });
     }

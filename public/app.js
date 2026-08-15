@@ -382,6 +382,7 @@ function sidebar() {
       <button class="nav-item ${state.screen === "people" ? "active" : ""}" data-screen="people"><span class="emoji">👥</span> People <span class="count">${d.people.length}</span></button>
       <button class="nav-item ${state.screen === "guests" ? "active" : ""}" data-screen="guests"><span class="emoji">🎟️</span> Guests${(d.guests && d.guests.length) ? ` <span class="count">${d.guests.length}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "events" ? "active" : ""}" data-screen="events"><span class="emoji">📅</span> Events${(d.events && d.events.length) ? ` <span class="count">${d.events.length}</span>` : ""}</button>
+      <button class="nav-item ${state.screen === "sourcing" ? "active" : ""}" data-screen="sourcing"><span class="emoji">🛒</span> Sourcing${(d.supplies && d.supplies.length) ? ` <span class="count">${d.supplies.length}</span>` : ""}</button>
       ${(() => { const n = (d.checklist || []).filter((c) => !c.done).length; return `<button class="nav-item ${state.screen === "checklist" ? "active" : ""}" data-screen="checklist"><span class="emoji">✅</span> Checklist${n ? ` <span class="count">${n}</span>` : ""}</button>`; })()}
       <button class="nav-item ${state.screen === "theme" ? "active" : ""}" data-screen="theme"><span class="emoji">🎨</span> Theme & Zones${(d.zones && d.zones.length) ? ` <span class="count">${d.zones.length}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "ideas" ? "active" : ""}" data-screen="ideas"><span class="emoji">💡</span> Ideas${d.newIdeas ? ` <span class="count">${d.newIdeas}</span>` : ""}</button>
@@ -433,6 +434,7 @@ function canvas() {
   if (state.screen === "people") return peopleView();
   if (state.screen === "guests") return guestsView();
   if (state.screen === "events") return eventsView();
+  if (state.screen === "sourcing") return sourcingView();
   if (state.screen === "checklist") return checklistView();
   if (state.screen === "theme") return themeView();
   if (state.screen === "ideas") return `<div id="ideasmount"><div class="empty">Loading ideas…</div></div>`;
@@ -1064,6 +1066,51 @@ async function seedStarterEvents() {
   await refresh(); render(); toast("Starter timeline added — fill in the dates");
 }
 
+/* ---------------- SOURCING (materials to track down — host-only) ---------------- */
+const SUPPLY_STATUS = [["needed", "🔎 To source", "#b45309"], ["claimed", "🙋 Claimed", "#1d4ed8"], ["purchased", "✅ Got it", "#15803d"]];
+const SS_COLOR = Object.fromEntries(SUPPLY_STATUS.map(([v, l, c]) => [v, c]));
+const SUP_INP = "border:1px solid var(--line-strong);border-radius:8px;padding:7px 9px;font:inherit;background:var(--surface)";
+function sourcingView() {
+  const d = state.data;
+  const items = (d.supplies || []).slice();
+  const total = items.reduce((s, x) => s + (Number(x.estimated_cost) || 0), 0);
+  const need = items.filter((x) => x.status !== "purchased").length;
+  const ord = { needed: 0, claimed: 1, purchased: 2 };
+  items.sort((a, b) => (ord[a.status] ?? 0) - (ord[b.status] ?? 0) || a.id - b.id);
+  return `<div style="max-width:820px">
+    <div style="margin-bottom:8px"><h1 style="margin:0;font-size:18px">🛒 Sourcing</h1><div class="countdown">Materials to track down — foam, pool noodles, floor mats, and the rest. Note where to buy, who's on it, and the cost.</div></div>
+    <div class="facts" style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:14px">
+      <div><div style="font-size:24px;font-weight:800">${items.length}</div><div class="meta">items</div></div>
+      <div><div style="font-size:24px;font-weight:800;color:var(--accent-strong)">${need}</div><div class="meta">still to get</div></div>
+      <div><div style="font-size:24px;font-weight:800">$${total.toFixed(0)}</div><div class="meta">est. cost</div></div>
+    </div>
+    <div class="facts" style="margin-bottom:14px"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="soItem" placeholder="Add a material… (e.g. pool noodles)" style="flex:1;min-width:170px;${SUP_INP}"/>
+      <input id="soQty" placeholder="qty" style="width:64px;${SUP_INP}"/>
+      <input id="soCost" type="number" inputmode="decimal" placeholder="$ est" style="width:84px;${SUP_INP}"/>
+      <button class="btn primary" data-add-supply>Add</button>
+    </div></div>
+    <div class="cards">${items.length ? items.map(supplyCard).join("") : `<div class="empty">Nothing yet — add the first material above.</div>`}</div>
+  </div>`;
+}
+function supplyCard(s) {
+  const d = state.data;
+  const areaOpts = `<option value="">— zone —</option>` + d.areas.map((a) => `<option value="${a.id}" ${s.area_id == a.id ? "selected" : ""}>${a.emoji || ""} ${esc(a.name)}</option>`).join("");
+  const whoOpts = `<option value="">— who —</option>` + d.people.map((p) => `<option value="${p.id}" ${s.assignee_id == p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("");
+  return `<div class="pcard">
+    <div style="display:flex;gap:8px;align-items:center"><input data-sitem="${s.id}" value="${esc(s.item)}" style="flex:1;min-width:0;font-weight:600;${SUP_INP}"/><select data-sstatus="${s.id}" style="${SUP_INP};color:${SS_COLOR[s.status] || ""}">${SUPPLY_STATUS.map(([v, l]) => `<option value="${v}" ${s.status === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+      <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px">Qty <input data-sqty="${s.id}" value="${esc(s.quantity || "")}" style="width:56px;${SUP_INP}"/></label>
+      <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px">$ <input type="number" inputmode="decimal" data-scost="${s.id}" value="${s.estimated_cost != null ? s.estimated_cost : ""}" style="width:74px;${SUP_INP}"/></label>
+      <select data-swho="${s.id}" style="${SUP_INP};flex:1;min-width:0">${whoOpts}</select>
+      <select data-sarea="${s.id}" style="${SUP_INP};flex:1;min-width:0">${areaOpts}</select>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">🔗<input data-slink="${s.id}" value="${esc(s.link || "")}" placeholder="Where to buy — paste a link" style="flex:1;min-width:0;${SUP_INP}"/>${s.link ? `<a class="btn small ghost" href="${esc(s.link)}" target="_blank" rel="noopener">Open</a>` : ""}</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">📝<input data-snotes="${s.id}" value="${esc(s.notes || "")}" placeholder="Notes" style="flex:1;min-width:0;${SUP_INP}"/></div>
+    <div style="margin-top:10px"><button class="btn ghost small danger" data-sdel="${s.id}">Remove</button></div>
+  </div>`;
+}
+
 function peopleView() {
   const d = state.data;
   return `<div style="display:flex;align-items:center;margin-bottom:14px"><div><h1 style="margin:0;font-size:18px">The crew</h1><div class="countdown">Each person gets a private link showing only their tasks, on their channel.</div></div><div class="grow"></div><button class="btn primary" data-add-person>+ Add person</button></div>
@@ -1227,6 +1274,17 @@ function wireCanvas() {
   const sev = $("[data-seed-events]"); if (sev) sev.onclick = seedStarterEvents;
   appEl.querySelectorAll("[data-edit-event]").forEach((b) => (b.onclick = () => openEventModal(Number(b.dataset.editEvent))));
   appEl.querySelectorAll("[data-del-event]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this event?")) return; await del("/api/events/" + b.dataset.delEvent); await refresh(); render(); }));
+  // sourcing
+  const asup = $("[data-add-supply]"); if (asup) { const addS = async () => { const item = $("#soItem").value.trim(); if (!item) return; const quantity = $("#soQty").value.trim() || null; const estimated_cost = $("#soCost").value ? Number($("#soCost").value) : null; await post("/api/supplies", { item, quantity, estimated_cost }); await refresh(); render(); }; asup.onclick = addS; const si = $("#soItem"); if (si) si.onkeydown = (e) => { if (e.key === "Enter") addS(); }; }
+  appEl.querySelectorAll("[data-sitem]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.sitem, { item: i.value.trim() || "(unnamed)" }); }));
+  appEl.querySelectorAll("[data-sstatus]").forEach((s) => (s.onchange = async () => { await patch("/api/supplies/" + s.dataset.sstatus, { status: s.value }); await refresh(); render(); }));
+  appEl.querySelectorAll("[data-sqty]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.sqty, { quantity: i.value.trim() || null }); }));
+  appEl.querySelectorAll("[data-scost]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.scost, { estimated_cost: i.value ? Number(i.value) : null }); await refresh(); render(); }));
+  appEl.querySelectorAll("[data-swho]").forEach((s) => (s.onchange = async () => { await patch("/api/supplies/" + s.dataset.swho, { assignee_id: s.value || null }); }));
+  appEl.querySelectorAll("[data-sarea]").forEach((s) => (s.onchange = async () => { await patch("/api/supplies/" + s.dataset.sarea, { area_id: s.value || null }); }));
+  appEl.querySelectorAll("[data-slink]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.slink, { link: i.value.trim() || null }); await refresh(); render(); }));
+  appEl.querySelectorAll("[data-snotes]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.snotes, { notes: i.value.trim() || null }); }));
+  appEl.querySelectorAll("[data-sdel]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this item?")) return; await del("/api/supplies/" + b.dataset.sdel); await refresh(); render(); }));
   // checklist
   const acb = $("[data-add-cl]"); if (acb) { const addC = async () => { const label = $("#clLabel").value.trim(); if (!label) return; const section = $("#clSection").value.trim() || null; await post("/api/checklist", { label, section }); await refresh(); render(); }; acb.onclick = addC; const cll = $("#clLabel"); if (cll) cll.onkeydown = (e) => { if (e.key === "Enter") addC(); }; }
   appEl.querySelectorAll("[data-cldone]").forEach((c) => (c.onchange = async () => { await patch("/api/checklist/" + c.dataset.cldone, { done: c.checked ? 1 : 0 }); await refresh(); render(); }));
