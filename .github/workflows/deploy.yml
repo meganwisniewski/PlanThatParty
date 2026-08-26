@@ -1,0 +1,31 @@
+name: Deploy to Cloudflare
+
+# Deploys the Worker + static site to Cloudflare automatically.
+# Runs on every push to the branches below, and can also be started by hand
+# from the Actions tab ("Run workflow") — no terminal required either way.
+on:
+  push:
+    branches:
+      - main
+      - claude/feedback-iteration-qwf2gq
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Deploy with Wrangler
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Only needed if your token can see more than one account.
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
