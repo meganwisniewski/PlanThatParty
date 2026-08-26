@@ -438,6 +438,7 @@ function sidebar() {
       <button class="nav-item ${state.screen === "events" ? "active" : ""}" data-screen="events"><span class="emoji">📅</span> Events${(d.events && d.events.length) ? ` <span class="count">${d.events.length}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "sourcing" ? "active" : ""}" data-screen="sourcing"><span class="emoji">🛒</span> Sourcing${(d.supplies && d.supplies.length) ? ` <span class="count">${d.supplies.length}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "inventory" ? "active" : ""}" data-screen="inventory"><span class="emoji">📦</span> Inventory${(d.inventory && d.inventory.length) ? ` <span class="count">${d.inventory.length}</span>` : ""}</button>
+      <button class="nav-item ${state.screen === "messages" ? "active" : ""}" data-screen="messages"><span class="emoji">✉️</span> Messages</button>
       ${(() => { const n = (d.checklist || []).filter((c) => !c.done).length; return `<button class="nav-item ${state.screen === "checklist" ? "active" : ""}" data-screen="checklist"><span class="emoji">✅</span> Checklist${n ? ` <span class="count">${n}</span>` : ""}</button>`; })()}
       <button class="nav-item ${state.screen === "theme" ? "active" : ""}" data-screen="theme"><span class="emoji">🎨</span> Theme & Zones${(d.zones && d.zones.length) ? ` <span class="count">${d.zones.length}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "ideas" ? "active" : ""}" data-screen="ideas"><span class="emoji">💡</span> Ideas${d.newIdeas ? ` <span class="count">${d.newIdeas}</span>` : ""}</button>
@@ -491,6 +492,7 @@ function canvas() {
   if (state.screen === "events") return eventsView();
   if (state.screen === "sourcing") return sourcingView();
   if (state.screen === "inventory") return inventoryView();
+  if (state.screen === "messages") return messagesView();
   if (state.screen === "checklist") return checklistView();
   if (state.screen === "theme") return themeView();
   if (state.screen === "ideas") return `<div id="ideasmount"><div class="empty">Loading ideas…</div></div>`;
@@ -1258,6 +1260,70 @@ function openIntakeModal(personId) {
   }));
 }
 
+/* ---------------- MESSAGES (draft group texts to the hosts) ---------------- */
+// Pretty date like "Sat, Oct 31" from a YYYY-MM-DD string, timezone-safe.
+function prettyDate(iso) {
+  if (!iso) return "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso); if (!m) return iso;
+  const dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return dt.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+function msgContext() {
+  const p = state.data.party || {};
+  const name = p.name || "the party";
+  const d = prettyDate(p.event_date);
+  const dateStr = d ? ` — ${d}${p.start_time ? `, ${p.start_time}` : ""}` : "";
+  const locStr = p.location ? ` @ ${p.location}` : "";
+  return { name, dateStr, locStr, site: location.origin, ideas: location.origin + "/ideas", cal: location.origin + "/api/calendar/party.ics" };
+}
+const MSG_TEMPLATES = [
+  ["kickoff", "🎃 Kickoff", (c) => `Hey team! Officially kicking off ${c.name}${c.dateStr}. I set up a site where we're tracking everything — zones, tasks, ideas, who's bringing what:\n${c.site}\n\nHave a poke around and add anything on your mind 👻`],
+  ["ideas", "💡 Vote on ideas", (c) => `Idea time for ${c.name} 🕸️ Drop decor/theme ideas and vote on everyone else's here (no login needed):\n${c.ideas}`],
+  ["inventory", "📦 What do you have?", (c) => `Quick one for ${c.name}: what do you already own that we could use? Thinking fog machines, UV / blacklights, coolers, drink dispensers, speakers, decor, tools — or anyone you know with access to cool stuff. Reply here and I'll log it all 🧰`],
+  ["setup", "🔨 Setup day", (c) => `Setup for ${c.name}${c.dateStr}${c.locStr}. Here's the plan + your tasks:\n${c.site}\n\nLmk what time you can get there 🛠️`],
+  ["save", "📅 Save the date", (c) => `Save the date — ${c.name}${c.dateStr}${c.locStr} 🎃 Add it to your calendar here:\n${c.cal}`],
+  ["custom", "✍️ Blank", () => ""],
+];
+// Build a tel/sms address list from the stored group + a body. iOS and
+// Android disagree on the separator before `body`, so sniff the platform.
+function smsHref(numbers, body) {
+  const nums = String(numbers || "").split(/[,\n]/).map((s) => s.replace(/[^\d+]/g, "")).filter(Boolean).join(",");
+  const sep = /iP(hone|ad|od)|Mac/.test(navigator.userAgent) ? "&" : "?";
+  return `sms:${nums}${nums ? sep : "?"}body=${encodeURIComponent(body || "")}`;
+}
+// Keep the "Open Messages" link in step with live edits to the text / numbers.
+function syncMsgOpen() {
+  const a = document.getElementById("msgOpen"); if (!a) return;
+  const t = document.getElementById("msgText"), n = document.getElementById("msgNums");
+  a.href = smsHref(n ? n.value : "", t ? t.value : "");
+}
+function messagesView() {
+  const c = msgContext();
+  const tpl = state.msgTpl || "kickoff";
+  const build = (MSG_TEMPLATES.find(([id]) => id === tpl) || MSG_TEMPLATES[0])[2];
+  const body = build(c);
+  const nums = (state.data.party && state.data.party.message_group) || "";
+  const chip = (id, label) => `<button class="btn small ${tpl === id ? "primary" : "ghost"}" data-msgtpl="${id}">${label}</button>`;
+  const inp = "border:1px solid var(--line-strong);border-radius:8px;padding:9px;font:inherit;width:100%;background:var(--surface)";
+  return `<div style="max-width:640px">
+    <div style="margin-bottom:12px"><h1 style="margin:0;font-size:18px">✉️ Messages</h1><div class="countdown">Draft a group text to the hosts with live links to the site. Copy it, or open Messages pre-addressed to your host group.</div></div>
+    <div class="facts" style="margin-bottom:14px"><h2 style="margin-top:0">Host group numbers</h2>
+      <div class="countdown" style="margin-bottom:8px">Remembered so every draft opens pre-addressed. Separate numbers with commas.</div>
+      <textarea id="msgNums" rows="2" placeholder="+15551234567, +15559876543" style="${inp};resize:vertical">${esc(nums)}</textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn small" data-save-nums>Save group</button><button class="btn small ghost" data-pull-nums>↓ Pull from crew phones</button></div>
+    </div>
+    <div class="facts">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${MSG_TEMPLATES.map(([id, l]) => chip(id, l)).join("")}</div>
+      <textarea id="msgText" rows="8" style="${inp};resize:vertical;line-height:1.45">${esc(body)}</textarea>
+      <div class="countdown" style="margin:8px 0 12px">Links stay live — they always point at the current site. Edit the text freely before sending.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn primary" data-msg-copy>📋 Copy text</button>
+        <a class="btn" id="msgOpen" href="${smsHref(nums, body)}">💬 Open Messages</a>
+      </div>
+    </div>
+  </div>`;
+}
+
 function peopleView() {
   const d = state.data;
   return `<div style="display:flex;align-items:center;margin-bottom:14px"><div><h1 style="margin:0;font-size:18px">The crew</h1><div class="countdown">Each person gets a private link showing only their tasks, on their channel.</div></div><div class="grow"></div><button class="btn primary" data-add-person>+ Add person</button></div>
@@ -1438,6 +1504,12 @@ function wireCanvas() {
   appEl.querySelectorAll("[data-edit-inv]").forEach((b) => (b.onclick = () => openInventoryModal(Number(b.dataset.editInv))));
   appEl.querySelectorAll("[data-del-inv]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this item?")) return; await del("/api/inventory/" + b.dataset.delInv); await refresh(); render(); }));
   appEl.querySelectorAll("[data-invcat]").forEach((b) => (b.onclick = () => { state.invCat = b.dataset.invcat || ""; render(); }));
+  // messages
+  appEl.querySelectorAll("[data-msgtpl]").forEach((b) => (b.onclick = () => { state.msgTpl = b.dataset.msgtpl; render(); }));
+  const savN = $("[data-save-nums]"); if (savN) savN.onclick = async () => { await patch("/api/party", { message_group: $("#msgNums").value.trim() || null }); await refresh(); render(); toast("Group saved"); };
+  const pullN = $("[data-pull-nums]"); if (pullN) pullN.onclick = () => { const nums = (state.data.people || []).map((p) => p.phone).filter(Boolean); const box = $("#msgNums"); if (box) { box.value = nums.join(", "); syncMsgOpen(); } toast(nums.length ? `Pulled ${nums.length} number${nums.length === 1 ? "" : "s"}` : "No crew phones on file"); };
+  const copyM = $("[data-msg-copy]"); if (copyM) copyM.onclick = () => { const t = $("#msgText").value; navigator.clipboard.writeText(t).then(() => toast("Message copied")).catch(() => prompt("Copy:", t)); };
+  const mt = $("#msgText"), mn = $("#msgNums"); if (mt) mt.oninput = syncMsgOpen; if (mn) mn.oninput = syncMsgOpen;
   // checklist
   const acb = $("[data-add-cl]"); if (acb) { const addC = async () => { const label = $("#clLabel").value.trim(); if (!label) return; const section = $("#clSection").value.trim() || null; await post("/api/checklist", { label, section }); await refresh(); render(); }; acb.onclick = addC; const cll = $("#clLabel"); if (cll) cll.onkeydown = (e) => { if (e.key === "Enter") addC(); }; }
   appEl.querySelectorAll("[data-cldone]").forEach((c) => (c.onchange = async () => { await patch("/api/checklist/" + c.dataset.cldone, { done: c.checked ? 1 : 0 }); await refresh(); render(); }));
