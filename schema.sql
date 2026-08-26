@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS party (
   theme_concept    TEXT,                     -- finalized theme (Theme & Zones page)
   theme_mood       TEXT,                     -- overall mood/aesthetic
   theme_inspiration TEXT,                    -- references / inspirations
+  message_group    TEXT,                     -- CSV of person ids in the host message group
   admin_pin        TEXT
 );
 
@@ -72,6 +73,7 @@ CREATE TABLE IF NOT EXISTS people (
   notes             TEXT,                    -- freeform context for co-hosts (interests, offers to help)
   avatar            TEXT,                    -- fantasy avatar: "fx:<key>" (built-in) or a data-URL image
   client_token      TEXT,                    -- idempotency key: dedupes a double-submit on add
+  intake            TEXT,                    -- JSON of guided-intake answers captured by the host
   role              TEXT,                    -- host | co-host | lead | volunteer
   is_approver       INTEGER DEFAULT 0,       -- can moderate the ideas pipeline from their own link
   reminder_minutes  TEXT DEFAULT '',         -- CSV of minutes-before offsets for calendar alarms (empty = none)
@@ -188,6 +190,23 @@ CREATE TABLE IF NOT EXISTS mentions (
   text       TEXT,                                              -- the comment text (context)
   seen       INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Inventory: things we already have or can get access to (vs. Sourcing, which
+-- is things to track down/buy). A holder is a crew member OR a freeform source
+-- (e.g. "Jake — Sarah's friend, has mannequin parts").
+CREATE TABLE IF NOT EXISTS inventory (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  item             TEXT NOT NULL,
+  category         TEXT,                       -- fog | uv | lighting | sound | coolers | drinks | decor | furniture | fabric | tools | vehicle | space | skill | other
+  quantity         TEXT,
+  status           TEXT DEFAULT 'have',        -- have | can_borrow | maybe | need_to_ask
+  holder_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+  holder_name      TEXT,                       -- freeform source when not a crew member
+  area_id          INTEGER REFERENCES areas(id) ON DELETE SET NULL,  -- what it's useful for
+  link             TEXT,
+  notes            TEXT,
+  created_at       TEXT DEFAULT (datetime('now'))
 );
 
 -- A private, informal guest list (host-only). The party is open — people

@@ -508,7 +508,7 @@ async function api(request, env, path) {
     // Host-only: the full plan (tasks, people, everything) requires the admin PIN.
     const gate = await requireAdmin(request, env);
     if (gate) return gate;
-    const [party, areas, people, tasks, supplies, fb, ni, gu, cl, zn, ev] = await Promise.all([
+    const [party, areas, people, tasks, supplies, fb, ni, gu, cl, zn, ev, inv] = await Promise.all([
       getParty(env),
       env.DB.prepare("SELECT * FROM areas ORDER BY sort_order, id").all(),
       env.DB.prepare("SELECT * FROM people ORDER BY name").all(),
@@ -534,6 +534,7 @@ async function api(request, env, path) {
       env.DB.prepare("SELECT * FROM checklist ORDER BY sort_order, id").all(),
       env.DB.prepare("SELECT * FROM zones ORDER BY sort_order, id").all(),
       env.DB.prepare("SELECT * FROM events ORDER BY (event_date IS NULL), event_date, start_time, sort_order, id").all(),
+      env.DB.prepare(`SELECT i.*, p.name AS holder_person_name, a.name AS area_name, a.emoji AS area_emoji FROM inventory i LEFT JOIN people p ON p.id = i.holder_person_id LEFT JOIN areas a ON a.id = i.area_id ORDER BY i.created_at DESC`).all(),
     ]);
     return json({
       party: partyClient(party),
@@ -546,6 +547,7 @@ async function api(request, env, path) {
       checklist: cl.results,
       zones: zn.results,
       events: ev.results,
+      inventory: inv.results,
       newFeedback: fb ? fb.n : 0,
       newIdeas: ni ? ni.n : 0,
     });
@@ -554,7 +556,7 @@ async function api(request, env, path) {
   // ---------- party ----------
   if (resource === "party" && method === "PATCH") {
     const b = await body(request);
-    await updateRow(env, "party", 1, pick(b, ["name", "event_date", "start_time", "location", "theme", "headcount_target", "budget_target", "notes", "cal_details", "public_fields", "theme_concept", "theme_mood", "theme_inspiration", "admin_pin"]));
+    await updateRow(env, "party", 1, pick(b, ["name", "event_date", "start_time", "location", "theme", "headcount_target", "budget_target", "notes", "cal_details", "public_fields", "theme_concept", "theme_mood", "theme_inspiration", "message_group", "admin_pin"]));
     return json({ ok: true });
   }
 
@@ -774,7 +776,7 @@ async function api(request, env, path) {
         env,
         "people",
         id,
-        pick(b, ["name", "email", "phone", "preferred_channel", "platform", "channel_notes", "notes", "avatar", "role", "is_approver", "reminder_minutes"])
+        pick(b, ["name", "email", "phone", "preferred_channel", "platform", "channel_notes", "notes", "avatar", "intake", "role", "is_approver", "reminder_minutes"])
       );
       return json({ ok: true });
     }
@@ -910,6 +912,34 @@ async function api(request, env, path) {
     }
     if (method === "DELETE" && id) {
       await env.DB.prepare("DELETE FROM supplies WHERE id = ?").bind(id).run();
+      return json({ ok: true });
+    }
+  }
+
+  // ---------- inventory (things we already have / can access — host-only) ----------
+  if (resource === "inventory") {
+    const INV = ["item", "category", "quantity", "status", "holder_person_id", "holder_name", "area_id", "link", "notes"];
+    if (method === "POST") {
+      const b = await body(request);
+      if (!b.item || !b.item.trim()) return err("Item required.");
+      const r = await env.DB.prepare(
+        `INSERT INTO inventory (item, category, quantity, status, holder_person_id, holder_name, area_id, link, notes)
+         VALUES (?,?,?,?,?,?,?,?,?)`
+      ).bind(
+        b.item.trim(), b.category || null, b.quantity || null, b.status || "have",
+        b.holder_person_id || null, b.holder_name || null, b.area_id || null,
+        b.link ? normalizeUrl(b.link) : null, b.notes || null
+      ).run();
+      return json({ id: r.meta.last_row_id }, 201);
+    }
+    if (method === "PATCH" && id) {
+      const b = await body(request);
+      if ("link" in b) b.link = b.link ? normalizeUrl(b.link) : null;
+      await updateRow(env, "inventory", id, pick(b, INV));
+      return json({ ok: true });
+    }
+    if (method === "DELETE" && id) {
+      await env.DB.prepare("DELETE FROM inventory WHERE id = ?").bind(id).run();
       return json({ ok: true });
     }
   }

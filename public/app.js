@@ -437,6 +437,7 @@ function sidebar() {
       <button class="nav-item ${state.screen === "guests" ? "active" : ""}" data-screen="guests"><span class="emoji">🎟️</span> Guests${(d.guests && d.guests.length) ? ` <span class="count">${d.guests.length}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "events" ? "active" : ""}" data-screen="events"><span class="emoji">📅</span> Events${(d.events && d.events.length) ? ` <span class="count">${d.events.length}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "sourcing" ? "active" : ""}" data-screen="sourcing"><span class="emoji">🛒</span> Sourcing${(d.supplies && d.supplies.length) ? ` <span class="count">${d.supplies.length}</span>` : ""}</button>
+      <button class="nav-item ${state.screen === "inventory" ? "active" : ""}" data-screen="inventory"><span class="emoji">📦</span> Inventory${(d.inventory && d.inventory.length) ? ` <span class="count">${d.inventory.length}</span>` : ""}</button>
       ${(() => { const n = (d.checklist || []).filter((c) => !c.done).length; return `<button class="nav-item ${state.screen === "checklist" ? "active" : ""}" data-screen="checklist"><span class="emoji">✅</span> Checklist${n ? ` <span class="count">${n}</span>` : ""}</button>`; })()}
       <button class="nav-item ${state.screen === "theme" ? "active" : ""}" data-screen="theme"><span class="emoji">🎨</span> Theme & Zones${(d.zones && d.zones.length) ? ` <span class="count">${d.zones.length}</span>` : ""}</button>
       <button class="nav-item ${state.screen === "ideas" ? "active" : ""}" data-screen="ideas"><span class="emoji">💡</span> Ideas${d.newIdeas ? ` <span class="count">${d.newIdeas}</span>` : ""}</button>
@@ -489,6 +490,7 @@ function canvas() {
   if (state.screen === "guests") return guestsView();
   if (state.screen === "events") return eventsView();
   if (state.screen === "sourcing") return sourcingView();
+  if (state.screen === "inventory") return inventoryView();
   if (state.screen === "checklist") return checklistView();
   if (state.screen === "theme") return themeView();
   if (state.screen === "ideas") return `<div id="ideasmount"><div class="empty">Loading ideas…</div></div>`;
@@ -1165,6 +1167,97 @@ function supplyCard(s) {
   </div>`;
 }
 
+/* ---------------- INVENTORY (what we have / can access — host-only) ---------------- */
+const INV_CATS = [["fog", "🌫️", "Fog / haze"], ["uv", "🟣", "UV / blacklight"], ["lighting", "💡", "Lighting"], ["sound", "🔊", "Sound / speakers"], ["coolers", "🧊", "Coolers"], ["drinks", "🥤", "Drink dispensers"], ["decor", "🎃", "Decor / props"], ["furniture", "🪑", "Furniture"], ["fabric", "🧵", "Fabric / textiles"], ["tools", "🔧", "Tools / build"], ["vehicle", "🚚", "Vehicle / hauling"], ["space", "🏠", "Space / workshop"], ["skill", "✋", "Skill / help"], ["other", "📦", "Other"]];
+const IC_EMOJI = Object.fromEntries(INV_CATS.map(([k, e]) => [k, e]));
+const IC_LABEL = Object.fromEntries(INV_CATS.map(([k, e, l]) => [k, l]));
+const INV_STATUS = [["have", "✅ Have it", "#15803d"], ["can_borrow", "🤝 Can borrow", "#1d4ed8"], ["maybe", "🤔 Maybe", "#b45309"], ["need_to_ask", "❓ Need to ask", "#5c6470"]];
+const IS2_LABEL = Object.fromEntries(INV_STATUS.map(([v, l]) => [v, l]));
+const IS2_COLOR = Object.fromEntries(INV_STATUS.map(([v, l, c]) => [v, c]));
+function invHolder(it) {
+  if (it.holder_person_id) { const p = personById(it.holder_person_id) || { name: it.holder_person_name || "?" }; return `<span style="display:inline-flex;align-items:center;gap:6px">${avatarHtml(p, 22)}${esc(p.name)}</span>`; }
+  if (it.holder_name) return `<span>🧑 ${esc(it.holder_name)}</span>`;
+  return `<span style="color:var(--faint)">no holder yet</span>`;
+}
+function inventoryView() {
+  const items = (state.data.inventory || []).slice();
+  const cat = state.invCat || "";
+  const shown = cat ? items.filter((i) => (i.category || "other") === cat) : items;
+  const counts = {}; items.forEach((i) => { const c = i.category || "other"; counts[c] = (counts[c] || 0) + 1; });
+  const chip = (k, label, n) => `<button class="btn small ${cat === k ? "primary" : "ghost"}" data-invcat="${k}">${label}${n ? ` <span class="count">${n}</span>` : ""}</button>`;
+  return `<div style="max-width:860px">
+    <div style="display:flex;align-items:center;margin-bottom:8px"><div><h1 style="margin:0;font-size:18px">📦 Inventory</h1><div class="countdown">What we already have or can get our hands on — and who has it. Run a quick <b>intake</b> with each person from the People page to fill this in.</div></div><div class="grow"></div><button class="btn primary" data-add-inv>+ Add item</button></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">${chip("", "All", items.length)}${INV_CATS.filter(([k]) => counts[k]).map(([k, e, l]) => chip(k, `${e} ${l}`, counts[k])).join("")}</div>
+    <div class="cards">${shown.length ? shown.map(inventoryCard).join("") : `<div class="empty">${items.length ? "Nothing in this category." : "Nothing logged yet — add an item, or run an intake with someone."}</div>`}</div>
+  </div>`;
+}
+function inventoryCard(it) {
+  const st = INV_STATUS.find(([v]) => v === it.status) || INV_STATUS[0];
+  return `<div class="pcard">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-size:20px">${IC_EMOJI[it.category] || "📦"}</span><h3 style="margin:0;font-size:15px">${esc(it.item)}</h3>${it.quantity ? `<span class="chip">${esc(it.quantity)}</span>` : ""}<div class="grow"></div><span class="chip" style="color:${st[2]}">${st[1]}</span></div>
+    <div class="chan" style="margin:8px 0 0">Held by ${invHolder(it)}${it.area_name ? ` · for ${it.area_emoji || ""} ${esc(it.area_name)}` : ""}</div>
+    ${it.notes ? `<div class="pnote">${esc(it.notes)}</div>` : ""}
+    ${it.link ? `<div style="margin-top:8px"><a class="btn small ghost" href="${esc(it.link)}" target="_blank" rel="noopener">🔗 Reference</a></div>` : ""}
+    <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap"><button class="btn ghost small" data-edit-inv="${it.id}">Edit</button><button class="btn ghost small danger" data-del-inv="${it.id}">Remove</button></div>
+  </div>`;
+}
+function openInventoryModal(id, prefill) {
+  const it = id ? (state.data.inventory || []).find((x) => x.id == id) || {} : (prefill || {});
+  const d = state.data;
+  const catOpts = `<option value="">— type —</option>` + INV_CATS.map(([k, e, l]) => `<option value="${k}" ${it.category === k ? "selected" : ""}>${e} ${l}</option>`).join("");
+  const stOpts = INV_STATUS.map(([v, l]) => `<option value="${v}" ${(it.status || "have") === v ? "selected" : ""}>${l}</option>`).join("");
+  const areaOpts = `<option value="">— useful for (optional) —</option>` + d.areas.map((a) => `<option value="${a.id}" ${it.area_id == a.id ? "selected" : ""}>${a.emoji || ""} ${esc(a.name)}</option>`).join("");
+  const startExternal = !it.holder_person_id && !!it.holder_name;
+  const holderOpts = `<option value="">— nobody yet —</option>` + d.people.map((p) => `<option value="${p.id}" ${it.holder_person_id == p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("") + `<option value="__ext" ${startExternal ? "selected" : ""}>Someone else (not on the crew)…</option>`;
+  modal(`<h3>${id ? "Edit item" : "Add to inventory"}</h3>
+    <label class="field"><span>Item</span><input id="ivItem" value="${esc(it.item || "")}" placeholder="e.g. Fog machine, 6 coolers, mannequin parts"/></label>
+    <div class="field two"><label><span>Type</span><select id="ivCat">${catOpts}</select></label><label><span>How many / how much</span><input id="ivQty" value="${esc(it.quantity || "")}" placeholder="e.g. 2, a bunch"/></label></div>
+    <div class="field two"><label><span>Status</span><select id="ivStatus">${stOpts}</select></label><label><span>Useful for</span><select id="ivArea">${areaOpts}</select></label></div>
+    <label class="field"><span>Who has it / access</span><select id="ivHolder">${holderOpts}</select></label>
+    <label class="field" id="ivExtWrap" style="${startExternal ? "" : "display:none"}"><span>Their name (friend, friend-of-friend…)</span><input id="ivExt" value="${esc(startExternal ? it.holder_name : "")}" placeholder="e.g. Jake — Sarah's friend"/></label>
+    <label class="field"><span>Link (optional)</span><input id="ivLink" value="${esc(it.link || "")}" placeholder="Photo or product link"/></label>
+    <label class="field"><span>Notes</span><textarea id="ivNotes" rows="2" placeholder="Condition, pickup details, anything handy…">${esc(it.notes || "")}</textarea></label>`,
+    async () => {
+      const holderSel = $("#ivHolder").value;
+      const payload = { item: $("#ivItem").value.trim(), category: $("#ivCat").value || null, quantity: $("#ivQty").value.trim() || null, status: $("#ivStatus").value, area_id: $("#ivArea").value || null, link: $("#ivLink").value.trim() || null, notes: $("#ivNotes").value.trim() || null, holder_person_id: (holderSel && holderSel !== "__ext") ? holderSel : null, holder_name: holderSel === "__ext" ? ($("#ivExt").value.trim() || null) : null };
+      if (!payload.item) return toast("Add an item name");
+      if (id) await patch("/api/inventory/" + id, payload); else await post("/api/inventory", payload);
+      await refresh(); render(); toast("Saved");
+    });
+  const hs = $("#ivHolder"); if (hs) hs.onchange = () => { const w = $("#ivExtWrap"); if (w) w.style.display = hs.value === "__ext" ? "" : "none"; };
+}
+
+/* ---- per-host guided intake: you ask, so hosts don't self-input ---- */
+const INTAKE_QS = [
+  ["gear", "🌫️ Big gear", "Fog machine, UV / blacklight, projector, speakers, coolers, drink dispensers — have any, or can get?"],
+  ["decor", "🎃 Existing decor", "Props, skeletons, string lights, fake plants, fabric, furniture we could reuse?"],
+  ["tools", "🔧 Build & tools", "Power tools, ladders, a garage or workspace we could build in?"],
+  ["skills", "✋ Skills to lend", "Sewing, painting, carpentry, welding, SFX makeup?"],
+  ["haul", "🚚 Hauling", "A truck or van for moving big stuff on setup days?"],
+  ["connections", "🤝 Connections", "Know anyone with access to useful things or space? (like a friend with mannequin parts, a workshop, storage)"],
+];
+function personHasIntake(p) { return !!(p && p.intake && p.intake !== "{}" && p.intake.length > 2); }
+function openIntakeModal(personId) {
+  const p = personById(personId); if (!p) return;
+  let ans = {}; try { ans = JSON.parse(p.intake || "{}") || {}; } catch {}
+  const inp = "border:1px solid var(--line-strong);border-radius:8px;padding:8px;font:inherit;width:100%;background:var(--surface);resize:vertical";
+  const closeIntake = modal(`<h3>🎤 Intake — ${esc(p.name)}</h3>
+    <p class="hint">Ask these while you chat and jot what they say. When something's concrete, tap <b>+ Inventory</b> to log it (with them as the holder).</p>
+    ${INTAKE_QS.map(([k, label, desc]) => `<div class="field"><span>${label}</span><div style="font-size:12px;color:var(--muted);margin:-2px 0 5px">${desc}</div><textarea data-intakeq="${k}" rows="2" style="${inp}">${esc(ans[k] || "")}</textarea><div style="margin-top:5px"><button type="button" class="btn small ghost" data-intake-add="${k}">+ Inventory</button></div></div>`).join("")}`,
+    async () => {
+      const out = {};
+      INTAKE_QS.forEach(([k]) => { const el = box.querySelector(`[data-intakeq="${k}"]`); if (el && el.value.trim()) out[k] = el.value.trim(); });
+      await patch("/api/people/" + personId, { intake: JSON.stringify(out) });
+      await refresh(); render(); toast("Intake saved");
+    });
+  const box = closeIntake.el;
+  const catFor = { decor: "decor", tools: "tools", skills: "skill", haul: "vehicle" };
+  box.querySelectorAll("[data-intake-add]").forEach((b) => (b.onclick = () => {
+    const k = b.dataset.intakeAdd, ext = k === "connections";
+    openInventoryModal(null, { holder_person_id: ext ? null : personId, holder_name: ext ? "" : null, category: catFor[k] || null, status: ext ? "maybe" : "have" });
+  }));
+}
+
 function peopleView() {
   const d = state.data;
   return `<div style="display:flex;align-items:center;margin-bottom:14px"><div><h1 style="margin:0;font-size:18px">The crew</h1><div class="countdown">Each person gets a private link showing only their tasks, on their channel.</div></div><div class="grow"></div><button class="btn primary" data-add-person>+ Add person</button></div>
@@ -1178,7 +1271,7 @@ function personCard(p) {
     <div style="font-size:13px;color:var(--muted)">${p.email ? `📧 ${esc(p.email)}<br>` : ""}${p.phone ? `📱 ${esc(p.phone)}<br>` : ""}${p.channel_notes ? `📝 ${esc(p.channel_notes)}` : ""}</div>
     ${p.notes ? `<div class="pnote">${esc(p.notes)}</div>` : ""}
     <div style="margin-top:10px"><span class="chip">${n} task${n === 1 ? "" : "s"}</span></div>
-    <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap"><button class="btn small" data-copy="${esc(p.share_token)}">🔗 Copy link</button><button class="btn ghost small" data-vcard="${p.id}" title="Save to your phone's contacts (iPhone & Android)">👤 Add to contacts</button><button class="btn ghost small danger" data-del-person="${p.id}">Remove</button></div>
+    <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap"><button class="btn small" data-person-intake="${p.id}">🎤 Intake${personHasIntake(p) ? ` <span class="chip" style="background:#e8f7ee;color:#1a7f42;padding:0 6px">✓</span>` : ""}</button><button class="btn ghost small" data-copy="${esc(p.share_token)}">🔗 Copy link</button><button class="btn ghost small" data-vcard="${p.id}" title="Save to your phone's contacts (iPhone & Android)">👤 Add to contacts</button><button class="btn ghost small danger" data-del-person="${p.id}">Remove</button></div>
   </div>`;
 }
 
@@ -1313,6 +1406,7 @@ function wireCanvas() {
   // people
   const ap = $("[data-add-person]"); if (ap) ap.onclick = () => openPersonModal();
   appEl.querySelectorAll("[data-edit-person]").forEach((b) => (b.onclick = () => openPersonModal(Number(b.dataset.editPerson))));
+  appEl.querySelectorAll("[data-person-intake]").forEach((b) => (b.onclick = () => openIntakeModal(Number(b.dataset.personIntake))));
   appEl.querySelectorAll("[data-del-person]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this person?")) return; await del("/api/people/" + b.dataset.delPerson); await refresh(); render(); }));
   appEl.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = () => { const url = location.origin + "/me/" + b.dataset.copy; navigator.clipboard.writeText(url).then(() => toast("Link copied")).catch(() => prompt("Copy:", url)); }));
   appEl.querySelectorAll("[data-vcard]").forEach((b) => (b.onclick = () => downloadVCard(b.dataset.vcard)));
@@ -1339,6 +1433,11 @@ function wireCanvas() {
   appEl.querySelectorAll("[data-slink]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.slink, { link: i.value.trim() || null }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-snotes]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.snotes, { notes: i.value.trim() || null }); }));
   appEl.querySelectorAll("[data-sdel]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this item?")) return; await del("/api/supplies/" + b.dataset.sdel); await refresh(); render(); }));
+  // inventory
+  const ainv = $("[data-add-inv]"); if (ainv) ainv.onclick = () => openInventoryModal();
+  appEl.querySelectorAll("[data-edit-inv]").forEach((b) => (b.onclick = () => openInventoryModal(Number(b.dataset.editInv))));
+  appEl.querySelectorAll("[data-del-inv]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this item?")) return; await del("/api/inventory/" + b.dataset.delInv); await refresh(); render(); }));
+  appEl.querySelectorAll("[data-invcat]").forEach((b) => (b.onclick = () => { state.invCat = b.dataset.invcat || ""; render(); }));
   // checklist
   const acb = $("[data-add-cl]"); if (acb) { const addC = async () => { const label = $("#clLabel").value.trim(); if (!label) return; const section = $("#clSection").value.trim() || null; await post("/api/checklist", { label, section }); await refresh(); render(); }; acb.onclick = addC; const cll = $("#clLabel"); if (cll) cll.onkeydown = (e) => { if (e.key === "Enter") addC(); }; }
   appEl.querySelectorAll("[data-cldone]").forEach((c) => (c.onchange = async () => { await patch("/api/checklist/" + c.dataset.cldone, { done: c.checked ? 1 : 0 }); await refresh(); render(); }));
