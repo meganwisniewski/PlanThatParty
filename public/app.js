@@ -1135,6 +1135,7 @@ function sourcingView() {
   const need = items.filter((x) => x.status !== "purchased").length;
   const ord = { needed: 0, claimed: 1, purchased: 2 };
   items.sort((a, b) => (ord[a.status] ?? 0) - (ord[b.status] ?? 0) || a.id - b.id);
+  const view = state.sourceView || "list";
   return `<div style="max-width:820px">
     <div style="margin-bottom:8px"><h1 style="margin:0;font-size:18px">🛒 Sourcing</h1><div class="countdown">Materials to track down — foam, pool noodles, floor mats, and the rest. Note where to buy, who's on it, and the cost.</div></div>
     <div class="facts" style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:14px">
@@ -1148,7 +1149,36 @@ function sourcingView() {
       <input id="soCost" type="number" inputmode="decimal" placeholder="$ est" style="width:84px;${SUP_INP}"/>
       <button class="btn primary" data-add-supply>Add</button>
     </div></div>
-    <div class="cards">${items.length ? items.map(supplyCard).join("") : `<div class="empty">Nothing yet — add the first material above.</div>`}</div>
+    <div style="display:flex;gap:6px;margin-bottom:12px">
+      <button class="btn small ${view === "list" ? "primary" : "ghost"}" data-sourceview="list">☰ List</button>
+      <button class="btn small ${view === "cards" ? "primary" : "ghost"}" data-sourceview="cards">▦ Cards</button>
+    </div>
+    ${items.length
+      ? (view === "list"
+        ? `<div style="display:flex;flex-direction:column;gap:8px">${items.map(supplyRow).join("")}</div>`
+        : `<div class="cards">${items.map(supplyCard).join("")}</div>`)
+      : `<div class="empty">Nothing yet — add the first material above.</div>`}
+  </div>`;
+}
+// List view: full item name on its own line so long names are fully readable.
+function supplyRow(s) {
+  const d = state.data;
+  const areaOpts = `<option value="">— zone —</option>` + d.areas.map((a) => `<option value="${a.id}" ${s.area_id == a.id ? "selected" : ""}>${a.emoji || ""} ${esc(a.name)}</option>`).join("");
+  const whoOpts = `<option value="">— who —</option>` + d.people.map((p) => `<option value="${p.id}" ${s.assignee_id == p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("");
+  const stColor = SS_COLOR[s.status] || "";
+  const rows = Math.min(5, Math.max(1, Math.ceil((s.item || "").length / 26)));
+  return `<div class="pcard" style="padding:10px 12px">
+    <textarea data-sitem="${s.id}" rows="${rows}" style="width:100%;font-weight:600;resize:none;line-height:1.35;field-sizing:content;${SUP_INP}">${esc(s.item)}</textarea>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+      <select data-sstatus="${s.id}" style="${SUP_INP};color:${stColor}">${SUPPLY_STATUS.map(([v, l]) => `<option value="${v}" ${s.status === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+      <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px">Qty <input data-sqty="${s.id}" value="${esc(s.quantity || "")}" style="width:56px;${SUP_INP}"/></label>
+      <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px">$ <input type="number" inputmode="decimal" data-scost="${s.id}" value="${s.estimated_cost != null ? s.estimated_cost : ""}" style="width:70px;${SUP_INP}"/></label>
+      <select data-swho="${s.id}" style="${SUP_INP};flex:1;min-width:110px">${whoOpts}</select>
+      <select data-sarea="${s.id}" style="${SUP_INP};flex:1;min-width:110px">${areaOpts}</select>
+      <button class="btn ghost small danger" data-sdel="${s.id}">Remove</button>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">🔗<input data-slink="${s.id}" value="${esc(s.link || "")}" placeholder="Where to buy — paste a link" style="flex:1;min-width:0;${SUP_INP}"/>${s.link ? `<a class="btn small ghost" href="${esc(s.link)}" target="_blank" rel="noopener">Open</a>` : ""}</div>
+    ${s.notes ? `<div style="display:flex;gap:8px;align-items:center;margin-top:8px">📝<input data-snotes="${s.id}" value="${esc(s.notes)}" placeholder="Notes" style="flex:1;min-width:0;${SUP_INP}"/></div>` : `<div style="margin-top:8px"><input data-snotes="${s.id}" value="" placeholder="📝 Notes" style="width:100%;${SUP_INP}"/></div>`}
   </div>`;
 }
 function supplyCard(s) {
@@ -1499,6 +1529,7 @@ function wireCanvas() {
   appEl.querySelectorAll("[data-slink]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.slink, { link: i.value.trim() || null }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-snotes]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.snotes, { notes: i.value.trim() || null }); }));
   appEl.querySelectorAll("[data-sdel]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this item?")) return; await del("/api/supplies/" + b.dataset.sdel); await refresh(); render(); }));
+  appEl.querySelectorAll("[data-sourceview]").forEach((b) => (b.onclick = () => { state.sourceView = b.dataset.sourceview; render(); }));
   // inventory
   const ainv = $("[data-add-inv]"); if (ainv) ainv.onclick = () => openInventoryModal();
   appEl.querySelectorAll("[data-edit-inv]").forEach((b) => (b.onclick = () => openInventoryModal(Number(b.dataset.editInv))));
