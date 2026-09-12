@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS party (
   budget_target    REAL,
   notes            TEXT,
   cal_details      TEXT,                     -- editable text shown in calendar-link events
+  costume_guidance TEXT,                     -- what to wear / costume notes for guests
+  transit_info     TEXT,                     -- parking, transit, rideshare notes for guests
+  show_times       TEXT,                     -- live-performance / haunted-basement showtimes
+  photo_album_url  TEXT,                     -- link to a shared (add-only) photo album
   public_fields    TEXT DEFAULT 'name,event_date,start_time', -- CSV of fields guests may see
   theme_concept    TEXT,                     -- finalized theme (Theme & Zones page)
   theme_mood       TEXT,                     -- overall mood/aesthetic
@@ -238,6 +242,7 @@ CREATE TABLE IF NOT EXISTS guests (
   phone      TEXT,                      -- optional
   email      TEXT,                      -- optional
   notes      TEXT,
+  guest_message TEXT,                   -- a note the guest left when they RSVP'd from the public page
   invited_by_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL, -- which host sent this invite
   confirmed  INTEGER DEFAULT 0,        -- week-of confirmation flag
   created_at TEXT DEFAULT (datetime('now'))

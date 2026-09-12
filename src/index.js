@@ -77,7 +77,7 @@ const pad = (n) => String(n).padStart(2, "0");
 // "6:30 PM to 11 PM") into structured start/end for a given event_date.
 // Falls back to an all-day event if it can't read a time.
 // Party fields a host may choose to reveal to guests (nothing else is public).
-const PUBLIC_FIELDS = ["name", "event_date", "start_time", "location", "theme", "headcount_target", "budget_target", "notes", "cal_details"];
+const PUBLIC_FIELDS = ["name", "event_date", "start_time", "location", "theme", "headcount_target", "budget_target", "notes", "cal_details", "costume_guidance", "transit_info", "show_times", "photo_album_url"];
 function publicSet(party) {
   const raw = party && party.public_fields != null ? party.public_fields : "name,event_date,start_time";
   return new Set(String(raw).split(",").map((s) => s.trim()).filter(Boolean));
@@ -365,6 +365,25 @@ async function api(request, env, path) {
     }
     return json(out);
   }
+  // POST /api/public/rsvp — open to guests: RSVP + optional note to the hosts.
+  // Upserts a guest row by (case-insensitive) name so hosts see it in Guests.
+  if (resource === "public" && id === "rsvp" && method === "POST") {
+    const b = await body(request);
+    const name = (b.name || "").trim();
+    if (!name) return err("Add your name so we know who's coming 🙂");
+    const status = ["coming", "maybe", "cant"].includes(b.status) ? b.status : "coming";
+    const plus = Math.max(0, Math.min(20, parseInt(b.plus_count, 10) || 0));
+    const msg = (b.message || "").trim().slice(0, 1000) || null;
+    const existing = await env.DB.prepare("SELECT id FROM guests WHERE lower(name) = lower(?) LIMIT 1").bind(name).first();
+    if (existing) {
+      await env.DB.prepare("UPDATE guests SET status = ?, plus_count = ?, guest_message = COALESCE(?, guest_message) WHERE id = ?")
+        .bind(status, plus, msg, existing.id).run();
+      return json({ ok: true, id: existing.id, updated: true });
+    }
+    const r = await env.DB.prepare("INSERT INTO guests (name, status, plus_count, guest_message) VALUES (?,?,?,?)")
+      .bind(name, status, plus, msg).run();
+    return json({ ok: true, id: r.meta.last_row_id, added: true }, 201);
+  }
 
   // ---------- Public party calendar (.ics), open to everyone ----------
   if (resource === "calendar") {
@@ -584,7 +603,7 @@ async function api(request, env, path) {
   // ---------- party ----------
   if (resource === "party" && method === "PATCH") {
     const b = await body(request);
-    await updateRow(env, "party", 1, pick(b, ["name", "event_date", "start_time", "location", "theme", "headcount_target", "budget_target", "notes", "cal_details", "public_fields", "theme_concept", "theme_mood", "theme_inspiration", "message_group", "admin_pin"]));
+    await updateRow(env, "party", 1, pick(b, ["name", "event_date", "start_time", "location", "theme", "headcount_target", "budget_target", "notes", "cal_details", "costume_guidance", "transit_info", "show_times", "photo_album_url", "public_fields", "theme_concept", "theme_mood", "theme_inspiration", "message_group", "admin_pin"]));
     return json({ ok: true });
   }
 

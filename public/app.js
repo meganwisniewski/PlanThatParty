@@ -204,7 +204,28 @@ async function renderGuest() {
       ${facts.length ? `<div class="facts" style="margin-top:14px"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px">
         ${facts.map(([l, v]) => `<div><div style="font-size:12px;color:var(--faint);font-weight:700;text-transform:uppercase;letter-spacing:.05em">${l}</div><div style="font-size:16px;font-weight:600;margin-top:2px">${esc(v)}</div></div>`).join("")}
       </div></div>` : ""}
-      ${has("notes") ? `<div class="facts" style="margin-top:14px"><p style="margin:0;color:var(--muted)">${esc(p.notes)}</p></div>` : ""}
+      ${has("notes") ? `<div class="facts" style="margin-top:14px"><p style="margin:0;color:var(--muted);white-space:pre-wrap">${esc(p.notes)}</p></div>` : ""}
+      ${has("costume_guidance") ? `<div class="facts" style="margin-top:14px"><h2>👗 Costumes</h2><p style="margin:0;color:var(--muted);white-space:pre-wrap">${esc(p.costume_guidance)}</p></div>` : ""}
+      ${has("show_times") ? `<div class="facts" style="margin-top:14px"><h2>🎭 Live shows</h2><p style="margin:0;color:var(--muted);white-space:pre-wrap">${esc(p.show_times)}</p></div>` : ""}
+      ${has("transit_info") ? `<div class="facts" style="margin-top:14px"><h2>🚗 Getting there</h2><p style="margin:0;color:var(--muted);white-space:pre-wrap">${esc(p.transit_info)}</p></div>` : ""}
+      ${has("photo_album_url") ? `<div class="facts" style="margin-top:14px;text-align:center"><h2>📸 Shared photo album</h2><p class="countdown" style="margin-bottom:12px">Add your photos from the night — the more the merrier 👻</p><a class="btn primary" href="${esc(p.photo_album_url)}" target="_blank" rel="noopener">Open the album</a></div>` : ""}
+      <div class="facts" style="margin-top:16px">
+        <h2 style="text-align:center">✋ Are you coming?</h2>
+        <p class="countdown" style="margin-bottom:12px;text-align:center">Let the hosts know — and drop a note if you like.</p>
+        <div id="rsvpForm">
+          <label class="field"><span>Your name</span><input id="rvName" placeholder="First & last"/></label>
+          <div class="field"><span>Will you be there?</span>
+            <div style="display:flex;gap:8px;flex-wrap:wrap" id="rvStatusRow">
+              <button type="button" class="btn" data-rvstatus="coming">✅ Coming</button>
+              <button type="button" class="btn" data-rvstatus="maybe">🤔 Maybe</button>
+              <button type="button" class="btn" data-rvstatus="cant">❌ Can't</button>
+            </div>
+          </div>
+          <label class="field"><span>Bringing anyone? <span style="color:var(--faint);font-weight:400">(how many extra)</span></span><input id="rvPlus" type="number" min="0" inputmode="numeric" placeholder="0"/></label>
+          <label class="field"><span>Note to the hosts <span style="color:var(--faint);font-weight:400">(optional)</span></span><textarea id="rvMsg" rows="2" placeholder="Dietary needs, a question, can help set up…"></textarea></label>
+          <button class="btn primary block" id="rvSend">Send RSVP</button>
+        </div>
+      </div>
       <div class="facts" style="margin-top:16px;text-align:center">
         <h2>💡 Have an idea?</h2>
         <p class="countdown" style="margin-bottom:12px">Costumes, food, music, decor — drop a suggestion. No account needed.</p>
@@ -213,6 +234,23 @@ async function renderGuest() {
       <p class="empty" style="font-size:12px;margin-top:22px">Helping run the party? <a href="#" id="hostLogin" style="color:var(--accent);font-weight:600">Host login</a></p>
     </div>`;
   const hl = $("#hostLogin"); if (hl) hl.onclick = (e) => { e.preventDefault(); askPin(); };
+  // RSVP form (public write — no login).
+  let rvStatus = "coming";
+  const paintStatus = () => appEl.querySelectorAll("[data-rvstatus]").forEach((b) => b.classList.toggle("primary", b.dataset.rvstatus === rvStatus));
+  appEl.querySelectorAll("[data-rvstatus]").forEach((b) => (b.onclick = () => { rvStatus = b.dataset.rvstatus; paintStatus(); }));
+  paintStatus();
+  const rv = $("#rvSend");
+  if (rv) rv.onclick = async () => {
+    const name = ($("#rvName").value || "").trim();
+    if (!name) return toast("Add your name so we know who's coming 🙂");
+    rv.disabled = true; rv.style.opacity = "0.6";
+    try {
+      await post("/api/public/rsvp", { name, status: rvStatus, plus_count: $("#rvPlus").value ? Number($("#rvPlus").value) : 0, message: ($("#rvMsg").value || "").trim() || null });
+      const form = $("#rsvpForm");
+      if (form) form.innerHTML = `<div class="empty" style="padding:18px"><div class="big">🎉 Thanks, ${esc(name)}!</div>Your RSVP is in — the hosts can see it now.</div>`;
+      toast("RSVP sent — thank you!");
+    } catch (e) { toast(e.message || "Couldn't send"); rv.disabled = false; rv.style.opacity = ""; }
+  };
 }
 
 /* ---------------- date helpers ---------------- */
@@ -1175,7 +1213,7 @@ function guestsView() {
         <thead><tr style="text-align:left;color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.05em">
           <th style="padding:6px 8px">Name</th><th style="padding:6px 8px">Response</th><th style="padding:6px 8px">Invited by</th><th style="padding:6px 8px">+Guests</th><th style="padding:6px 8px" title="Confirmed the week-of">✓</th><th style="padding:6px 8px">Phone</th><th style="padding:6px 8px">Email</th><th style="padding:6px 8px">Notes</th><th></th></tr></thead>
         <tbody>${shown.map((g) => `<tr style="border-top:1px solid var(--line)">
-          <td style="padding:6px 8px"><input data-gname="${g.id}" value="${esc(g.name)}" style="width:100%;min-width:130px;${inp}"/></td>
+          <td style="padding:6px 8px"><input data-gname="${g.id}" value="${esc(g.name)}" style="width:100%;min-width:130px;${inp}"/>${g.guest_message ? `<div style="font-size:12px;color:var(--accent-purple);margin-top:4px;white-space:pre-wrap" title="Note left when they RSVP'd">💬 ${esc(g.guest_message)}</div>` : ""}</td>
           <td style="padding:6px 8px"><select data-gstatus="${g.id}" style="${inp};color:${GS_COLOR[g.status] || ""}">${GUEST_STATUS.map(([v, l]) => `<option value="${v}" ${g.status === v ? "selected" : ""}>${l}</option>`).join("")}</select></td>
           <td style="padding:6px 8px"><select data-gby="${g.id}" style="${inp};min-width:120px">${hostOpts(g.invited_by_person_id)}</select></td>
           <td style="padding:6px 8px"><input type="number" min="0" data-gplus="${g.id}" value="${Number(g.plus_count) || 0}" style="width:68px;${inp}"/></td>
@@ -1673,6 +1711,14 @@ function settingsView() {
       <label class="field"><span>📅 Calendar event details</span><textarea id="stCal" rows="6" placeholder="This is exactly what shows up when anyone adds the party to their calendar — address, timing, costume note, parking, ride plan, etc.">${esc(p.cal_details || "")}</textarea><div style="font-size:11px;color:var(--faint);margin-top:4px">Shows in the "Add to calendar" event (Google, Apple, Outlook). Edit freely — it updates every link.</div></label>
       <button class="btn primary" data-save-party>Save details</button>
     </div>
+    <div class="facts" style="margin-top:14px"><h2>🎃 Guest info</h2>
+      <div class="countdown" style="margin-bottom:10px">Extra details for the public guest page. Fill what's useful, then choose below which ones guests can see.</div>
+      <label class="field"><span>👗 Costume guidance</span><textarea id="stCostume" rows="3" placeholder="Theme, dress code, how spooky to go, prizes for best costume…">${esc(p.costume_guidance || "")}</textarea></label>
+      <label class="field"><span>🚗 Parking / transit</span><textarea id="stTransit" rows="3" placeholder="Where to park, nearest transit, rideshare drop-off, carpool notes…">${esc(p.transit_info || "")}</textarea></label>
+      <label class="field"><span>🎭 Show times</span><textarea id="stShows" rows="3" placeholder="Live performances in the haunted basement — e.g. 9:00 & 10:30 PM walk-throughs…">${esc(p.show_times || "")}</textarea></label>
+      <label class="field"><span>📸 Photo album link</span><input id="stAlbum" value="${esc(p.photo_album_url || "")}" placeholder="Paste a shared album link (e.g. Google Photos / iCloud)"/><div style="font-size:11px;color:var(--faint);margin-top:4px">Tip: in your album's share settings, allow guests to <b>add photos</b> but turn <b>off</b> deleting — so nobody removes shots by accident.</div></label>
+      <button class="btn primary" data-save-guestinfo>Save guest info</button>
+    </div>
     ${publicInfoSection(p)}
     <div class="facts" style="margin-top:14px"><h2>Accessibility</h2>
       <label style="display:flex;align-items:center;gap:12px;cursor:pointer">
@@ -1699,6 +1745,10 @@ const PUBLIC_FIELD_OPTS = [
   ["budget_target", "Budget"],
   ["notes", "Note to the crew"],
   ["cal_details", "Calendar event details"],
+  ["costume_guidance", "Costume guidance"],
+  ["transit_info", "Parking / transit"],
+  ["show_times", "Show times"],
+  ["photo_album_url", "Photo album link"],
 ];
 function publicSetClient(p) { return new Set(String((p && p.public_fields != null) ? p.public_fields : "name,event_date,start_time").split(",").map((s) => s.trim()).filter(Boolean)); }
 function publicInfoSection(p) {
@@ -1837,6 +1887,7 @@ function wireCanvas() {
   appEl.querySelectorAll("[data-cldel]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this item?")) return; await del("/api/checklist/" + b.dataset.cldel); await refresh(); render(); }));
   // settings
   const spb = $("[data-save-party]"); if (spb) spb.onclick = async () => { await patch("/api/party", { name: $("#stName").value.trim(), event_date: $("#stDate").value || null, start_time: $("#stTime").value.trim() || null, location: $("#stLoc").value.trim() || null, theme: $("#stTheme").value.trim() || null, headcount_target: $("#stHead").value ? Number($("#stHead").value) : null, budget_target: $("#stBudget").value ? Number($("#stBudget").value) : null, notes: $("#stNotes").value.trim() || null, cal_details: $("#stCal").value.trim() || null }); await refresh(); render(); toast("Saved"); };
+  const gib = $("[data-save-guestinfo]"); if (gib) gib.onclick = async () => { await patch("/api/party", { costume_guidance: $("#stCostume").value.trim() || null, transit_info: $("#stTransit").value.trim() || null, show_times: $("#stShows").value.trim() || null, photo_album_url: $("#stAlbum").value.trim() || null }); await refresh(); render(); toast("Guest info saved"); };
   const pubb = $("[data-save-public]"); if (pubb) pubb.onclick = async () => { const fields = [...appEl.querySelectorAll("[data-pub]:checked")].map((c) => c.dataset.pub).join(","); await patch("/api/party", { public_fields: fields }); await refresh(); render(); toast("Public info updated"); };
   const pinb = $("[data-save-pin]"); if (pinb) pinb.onclick = async () => { const v = $("#stPin").value.trim(); if (!v) return toast("Type a PIN"); await patch("/api/party", { admin_pin: v }); setPin(v); await refresh(); render(); toast("PIN saved"); };
   const qz = $("#stQuiet"); if (qz) qz.onchange = () => { setQuietMode(qz.checked); toast(qz.checked ? "Quiet mode on" : "Quiet mode off"); };
