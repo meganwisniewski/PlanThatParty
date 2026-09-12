@@ -409,7 +409,7 @@ function render() {
   // have the data (no re-fetch flash) — or they'd stay stuck on "Loading…".
   if (state.screen === "ideas") { if (ideasLoaded) drawIdeas(); else mountIdeas(); }
   else if (state.screen === "feedback") { if (fbData) drawFeedback(); else mountFeedback(); }
-  else if (state.screen === "theme") { if (fpData) drawFloorplans(); else mountFloorplans(); if (zonePhotos) drawZonePhotos(); else mountZonePhotos(); }
+  else if (state.screen === "theme") { if (fpData) drawFloorplans(); else mountFloorplans(); if (zonePhotos) drawZonePhotos(); else mountZonePhotos(); if (zoneImages) drawZoneImages(); else mountZoneImages(); }
   if (state.panelOpen && state.selectedTaskId) { if (taskExtras.id === state.selectedTaskId && taskExtras.comments) drawTaskExtras(); else mountTaskExtras(state.selectedTaskId); }
   const c = $(".canvas"); if (c) c.scrollTop = scrollY;
 }
@@ -987,6 +987,7 @@ const VIBE_META = { cute: { label: "Cute", emoji: "💚", color: "#15803d", bg: 
 function vibeChip(v) { const m = VIBE_META[v]; return m ? `<span class="chip" style="color:${m.color};background:${m.bg}">${m.emoji} ${m.label}</span>` : ""; }
 let fpData = null; // cached floor-plan images (fetched separately from state)
 let zonePhotos = null; // cached [{zone_id, idea_id, title, thumb}] for the per-zone galleries
+let zoneImages = null; // cached [{id, zone_id, name, thumb, data}] host-provided source images
 
 function themeView() {
   const p = state.data.party || {};
@@ -1013,6 +1014,7 @@ function zoneCard(z) {
   return `<div class="pcard" data-zonecard="${z.id}">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h3>${esc(z.name)}</h3>${vibeChip(z.vibe)}<div class="grow"></div><button class="btn ghost small" data-edit-zone="${z.id}">Edit</button></div>
     ${z.decor ? `<div style="font-size:13px;color:var(--muted);margin-top:8px;white-space:pre-wrap">${esc(z.decor)}</div>` : `<div style="font-size:13px;color:var(--faint);margin-top:8px">No decor notes yet.</div>`}
+    <div class="zsrc" id="zsrc-${z.id}"></div>
     <div class="zphotos" id="zph-${z.id}"></div>
     <div style="margin-top:10px"><button class="btn ghost small danger" data-del-zone="${z.id}">Remove</button></div>
   </div>`;
@@ -1032,6 +1034,21 @@ function drawZonePhotos() {
     el.querySelectorAll("[data-zoomidea]").forEach((im) => (im.onclick = async () => { if (!ideasLoaded) { try { ideasData = await get("/api/ideas"); ideasLoaded = true; } catch {} } openIdeaDetail(Number(im.dataset.zoomidea)); }));
   });
 }
+async function mountZoneImages() {
+  try { zoneImages = await get("/api/zones/images"); } catch { zoneImages = []; }
+  drawZoneImages();
+}
+function drawZoneImages() {
+  if (!zoneImages) return;
+  const byZone = {};
+  zoneImages.forEach((im) => { (byZone[im.zone_id] = byZone[im.zone_id] || []).push(im); });
+  (state.data.zones || []).forEach((z) => {
+    const el = $("#zsrc-" + z.id); if (!el) return;
+    const list = byZone[z.id] || [];
+    el.innerHTML = list.length ? `<div class="section-title" style="margin:12px 0 6px">Source images · ${list.length}</div><div class="zstrip">${list.map((im) => `<img src="${im.thumb || im.data}" data-zsrczoom="${esc(im.data)}" title="${esc(im.name || "")}" alt="${esc(im.name || "reference image")}"/>`).join("")}</div>` : "";
+    el.querySelectorAll("[data-zsrczoom]").forEach((im) => (im.onclick = () => openLightbox(im.dataset.zsrczoom)));
+  });
+}
 async function mountFloorplans() {
   const mount = $("#fpmount"); if (!mount) return;
   try { fpData = await get("/api/floorplans"); } catch (e) { mount.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
@@ -1049,16 +1066,39 @@ function drawFloorplans() {
 function openZoneModal(id) {
   const z = id ? (state.data.zones || []).find((x) => x.id == id) || {} : {};
   const vibeOpts = ["", "cute", "unsettling", "scary"].map((v) => `<option value="${v}" ${z.vibe === v ? "selected" : ""}>${v ? VIBE_META[v].emoji + " " + VIBE_META[v].label : "— vibe (optional) —"}</option>`).join("");
-  modal(`<h3>${id ? "Edit zone" : "Add a zone"}</h3>
+  const imgSection = id
+    ? `<div class="field"><span>Source / reference images <span style="color:var(--faint);font-weight:400">— inspiration, sketches, product shots</span></span>
+        <div id="zImgMount" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"></div>
+        <label class="btn small" style="cursor:pointer">⬆ Add image<input type="file" id="zImgUp" accept="image/*" multiple hidden/></label></div>`
+    : `<div class="field"><span>Source / reference images</span><div style="font-size:13px;color:var(--muted)">Save the zone first, then reopen it to add reference images.</div></div>`;
+  const m = modal(`<h3>${id ? "Edit zone" : "Add a zone"}</h3>
     <label class="field"><span>Area name</span><input id="zName" value="${esc(z.name || "")}" placeholder="e.g. Basement · Swamp"/></label>
     <label class="field"><span>Vibe</span><select id="zVibe">${vibeOpts}</select></label>
-    <label class="field"><span>Decor notes</span><textarea id="zDecor" rows="6" placeholder="Props, colors, lighting, fog, reused materials, who's building it…">${esc(z.decor || "")}</textarea></label>`,
+    <label class="field"><span>Decor notes</span><textarea id="zDecor" rows="6" placeholder="Props, colors, lighting, fog, reused materials, who's building it…">${esc(z.decor || "")}</textarea></label>
+    ${imgSection}`,
     async () => {
       const name = $("#zName").value.trim(); if (!name) return toast("Name the zone");
       const payload = { name, vibe: $("#zVibe").value || null, decor: $("#zDecor").value.trim() || null };
       if (id) await patch("/api/zones/" + id, payload); else await post("/api/zones", payload);
       await refresh(); render(); toast("Saved");
     });
+  if (id) {
+    const drawImgs = (list) => {
+      const mount = m.el.querySelector("#zImgMount"); if (!mount) return;
+      mount.innerHTML = list.length ? list.map((im) => `<div style="position:relative"><img src="${im.thumb || im.data}" data-zim="${esc(im.data)}" style="width:70px;height:70px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:zoom-in"/><button type="button" class="att-x" data-zimdel="${im.id}" title="Remove" style="top:-6px;right:-6px">✕</button></div>`).join("") : `<div style="font-size:12px;color:var(--faint)">None yet.</div>`;
+      mount.querySelectorAll("[data-zim]").forEach((im) => (im.onclick = () => openLightbox(im.dataset.zim)));
+      mount.querySelectorAll("[data-zimdel]").forEach((b) => (b.onclick = async () => { await del("/api/zones/image/" + b.dataset.zimdel); zoneImages = await get("/api/zones/images").catch(() => zoneImages); drawImgs((zoneImages || []).filter((x) => x.zone_id == id)); drawZoneImages(); }));
+    };
+    (async () => { zoneImages = await get("/api/zones/images").catch(() => zoneImages || []); drawImgs((zoneImages || []).filter((x) => x.zone_id == id)); })();
+    const up = m.el.querySelector("#zImgUp");
+    if (up) up.onchange = async () => {
+      const files = [...up.files]; up.value = ""; if (!files.length) return;
+      toast("Uploading…");
+      for (const f of files) { try { const data = await resizeImage(f, 1600, 0.8); const thumb = await resizeImage(f, 400, 0.7); await post(`/api/zones/${id}/images`, { name: f.name, data, thumb }); } catch {} }
+      zoneImages = await get("/api/zones/images").catch(() => zoneImages);
+      drawImgs((zoneImages || []).filter((x) => x.zone_id == id)); drawZoneImages(); toast("Added");
+    };
+  }
 }
 function wireTheme() {
   const st = $("[data-save-theme]"); if (st) st.onclick = async () => { await patch("/api/party", { theme_concept: $("#thConcept").value.trim() || null, theme_mood: $("#thMood").value.trim() || null, theme_inspiration: $("#thInspo").value.trim() || null }); await refresh(); toast("Theme saved"); };

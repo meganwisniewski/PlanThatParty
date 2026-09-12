@@ -632,6 +632,26 @@ async function api(request, env, path) {
       ).all()).results;
       return json(rows);
     }
+    // GET /api/zones/images — all host-provided source images (grouped client-side).
+    if (method === "GET" && id === "images") {
+      const rows = (await env.DB.prepare("SELECT id, zone_id, name, thumb, data, sort_order FROM zone_images ORDER BY sort_order, id").all()).results;
+      return json(rows);
+    }
+    // POST /api/zones/:id/images { data, thumb, name } — add a source image to a zone.
+    if (method === "POST" && id && seg[3] === "images") {
+      const b = await body(request);
+      if (!b.data || typeof b.data !== "string") return err("Image required.");
+      if (b.data.length > 1500000) return err("Image too large.");
+      const r = await env.DB.prepare(
+        "INSERT INTO zone_images (zone_id, name, data, thumb, sort_order) VALUES (?,?,?,?,?)"
+      ).bind(id, b.name || null, b.data, b.thumb || null, b.sort_order || 0).run();
+      return json({ id: r.meta.last_row_id }, 201);
+    }
+    // DELETE /api/zones/image/:imgId — remove one source image.
+    if (method === "DELETE" && id === "image" && seg[3]) {
+      await env.DB.prepare("DELETE FROM zone_images WHERE id = ?").bind(seg[3]).run();
+      return json({ ok: true });
+    }
     if (method === "POST") {
       const b = await body(request);
       if (!b.name || !b.name.trim()) return err("Zone name required.");
@@ -647,6 +667,7 @@ async function api(request, env, path) {
     }
     if (method === "DELETE" && id) {
       await env.DB.prepare("DELETE FROM zones WHERE id = ?").bind(id).run();
+      await env.DB.prepare("DELETE FROM zone_images WHERE zone_id = ?").bind(id).run();
       return json({ ok: true });
     }
   }
