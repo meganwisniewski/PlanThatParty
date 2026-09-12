@@ -6,6 +6,8 @@
     <title>Josephween 🎃</title>
     <link rel="stylesheet" href="/styles.css" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎃</text></svg>" />
+    <!-- Apply Quiet mode before first paint so there's no flash of loud UI. -->
+    <script>try{if(localStorage.getItem("ptp_quiet")==="1")document.documentElement.setAttribute("data-quiet","1");}catch(e){}</script>
   </head>
   <body>
     <div id="app"><div class="boot">Loading the plan…</div></div>

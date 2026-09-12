@@ -31,7 +31,7 @@ const post = (p, b) => apiFetch(p, { method: "POST", body: JSON.stringify(b || {
 const patch = (p, b) => apiFetch(p, { method: "PATCH", body: JSON.stringify(b) });
 const del = (p) => apiFetch(p, { method: "DELETE" });
 
-function toast(msg) { const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 2000); }
+function toast(msg) { const t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); t.setAttribute("aria-live", "polite"); t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 2000); }
 
 /* ---------------- domain constants ---------------- */
 const STATUSES = ["todo", "claimed", "in_progress", "blocked", "done"];
@@ -260,6 +260,15 @@ function matchesFilter(t) {
 // Which host is signed in on this device (for comment / feedback attribution).
 // Stored per-device so a host is remembered between visits.
 function getHostId() { try { return localStorage.getItem("hostPersonId") || ""; } catch { return ""; } }
+// Quiet mode — a calmer, lower-motion surface (see styles.css). Per-device
+// choice; applied to <html> so the CSS can react. The <head> inline script
+// applies it before first paint; this keeps it in sync when toggled live.
+function quietMode() { try { return localStorage.getItem("ptp_quiet") === "1"; } catch { return false; } }
+function setQuietMode(on) {
+  try { localStorage.setItem("ptp_quiet", on ? "1" : "0"); } catch {}
+  if (on) document.documentElement.setAttribute("data-quiet", "1");
+  else document.documentElement.removeAttribute("data-quiet");
+}
 // The planning team who can post as themselves: anyone with admin access
 // (approvers) plus hosts/co-hosts/PM roles — i.e. everyone but plain volunteers.
 function hostPeople() { return ((state.data && state.data.people) || []).filter((p) => p.is_approver || ["host", "co-host", "pm"].includes(String(p.role || "").toLowerCase())); }
@@ -382,13 +391,14 @@ function render() {
   const party = d.party || {};
   const cd = countdown(party.event_date);
   appEl.innerHTML = `
+    <a href="#canvas" class="btn skip-link">Skip to main content</a>
     <div class="shell ${state.panelOpen ? "panel-open" : ""}">
       ${state.navOpen ? `<div class="nav-backdrop" data-navclose></div>` : ""}
       ${sidebar()}
       <div class="main">
         ${mentionBanner()}
         ${topbar(party, cd)}
-        <div class="canvas" id="canvas">${canvas()}</div>
+        <main class="canvas" id="canvas" tabindex="-1">${canvas()}</main>
       </div>
       ${state.panelOpen ? `<aside class="panel">${panel()}</aside>` : ""}
     </div>`;
@@ -464,7 +474,7 @@ function topbar(party, cd) {
   return `
   <div class="topbar">
     <div class="topbar-row">
-      <button class="btn ghost navtoggle" data-navtoggle>☰</button>
+      <button class="btn ghost navtoggle" data-navtoggle aria-label="${state.navOpen ? "Close menu" : "Open menu"}" aria-expanded="${state.navOpen ? "true" : "false"}">☰</button>
       <div class="title-block">
         <h1>${esc(party.name || "The Party")}</h1>
         ${cd ? `<span class="countdown">🗓️ ${esc(party.event_date ? fmtDate(party.event_date) : "")} · <b>${esc(cd.text)}</b></span>` : `<span class="countdown">Set the date →</span>`}
@@ -1624,6 +1634,13 @@ function settingsView() {
       <button class="btn primary" data-save-party>Save details</button>
     </div>
     ${publicInfoSection(p)}
+    <div class="facts" style="margin-top:14px"><h2>Accessibility</h2>
+      <label style="display:flex;align-items:center;gap:12px;cursor:pointer">
+        <input type="checkbox" id="stQuiet" ${quietMode() ? "checked" : ""} style="width:20px;height:20px;flex:none"/>
+        <span><b>Quiet mode</b><div style="font-size:13px;color:var(--muted);margin-top:2px">Calmer colors, softer shadows, and no motion or hover animations — a lower-stimulation view. Saved on this device.</div></span>
+      </label>
+      <div class="countdown" style="margin-top:10px">Motion is also turned off automatically whenever your device's “Reduce Motion” setting is on.</div>
+    </div>
     <div class="facts" style="margin-top:14px"><h2>Admin PIN</h2>
       <div class="countdown" style="margin-bottom:10px">Protects editing. Volunteers never need it. ${state.data.pinConfigured ? "" : "<b>No PIN set — anyone can edit.</b>"}</div>
       <label class="field"><span>Set / change PIN</span><input id="stPin" placeholder="${state.data.pinConfigured ? "New PIN" : "Choose a PIN"}"/></label>
@@ -1782,6 +1799,7 @@ function wireCanvas() {
   const spb = $("[data-save-party]"); if (spb) spb.onclick = async () => { await patch("/api/party", { name: $("#stName").value.trim(), event_date: $("#stDate").value || null, start_time: $("#stTime").value.trim() || null, location: $("#stLoc").value.trim() || null, theme: $("#stTheme").value.trim() || null, headcount_target: $("#stHead").value ? Number($("#stHead").value) : null, budget_target: $("#stBudget").value ? Number($("#stBudget").value) : null, notes: $("#stNotes").value.trim() || null, cal_details: $("#stCal").value.trim() || null }); await refresh(); render(); toast("Saved"); };
   const pubb = $("[data-save-public]"); if (pubb) pubb.onclick = async () => { const fields = [...appEl.querySelectorAll("[data-pub]:checked")].map((c) => c.dataset.pub).join(","); await patch("/api/party", { public_fields: fields }); await refresh(); render(); toast("Public info updated"); };
   const pinb = $("[data-save-pin]"); if (pinb) pinb.onclick = async () => { const v = $("#stPin").value.trim(); if (!v) return toast("Type a PIN"); await patch("/api/party", { admin_pin: v }); setPin(v); await refresh(); render(); toast("PIN saved"); };
+  const qz = $("#stQuiet"); if (qz) qz.onchange = () => { setQuietMode(qz.checked); toast(qz.checked ? "Quiet mode on" : "Quiet mode off"); };
   // theme & zones
   if (state.screen === "theme") wireTheme();
 }
@@ -1860,9 +1878,14 @@ function modal(inner, onSave, opts = {}) {
   // elements that live inside a -webkit-overflow-scrolling container, so a close
   // button in the scroll flow can drift out of reach. This one can't. The inner
   // .modal-x is kept for desktop (where sticky works fine).
-  back.innerHTML = `<button class="modal-x-fixed" data-close type="button" aria-label="Close">✕</button><div class="modal"><div class="modal-xrow"><button class="modal-x" data-close aria-label="Close">✕</button></div>${inner}<div class="modal-actions">${fbBtn}<button class="btn ghost" data-close>Cancel</button>${onSave ? `<button class="btn primary" data-save>Save</button>` : ""}</div></div>`;
+  back.innerHTML = `<button class="modal-x-fixed" data-close type="button" aria-label="Close">✕</button><div class="modal" role="dialog" aria-modal="true"><div class="modal-xrow"><button class="modal-x" data-close aria-label="Close">✕</button></div>${inner}<div class="modal-actions">${fbBtn}<button class="btn ghost" data-close>Cancel</button>${onSave ? `<button class="btn primary" data-save>Save</button>` : ""}</div></div>`;
   document.body.appendChild(back);
-  const close = () => back.remove();
+  // Name the dialog for screen readers from its own heading.
+  const dlgH = back.querySelector(".modal h3");
+  if (dlgH) { if (!dlgH.id) dlgH.id = "mdlh-" + Math.random().toString(36).slice(2, 8); back.querySelector(".modal").setAttribute("aria-labelledby", dlgH.id); }
+  const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  const close = () => { back.remove(); document.removeEventListener("keydown", onKey); };
+  document.addEventListener("keydown", onKey);
   back.addEventListener("click", (e) => { if (e.target === back) close(); });
   back.querySelectorAll("[data-close]").forEach((b) => (b.onclick = close));
   const mfb = back.querySelector("[data-modal-fb]");
@@ -2268,13 +2291,13 @@ function dialMarkup(level, labels, id) {
   const [nx, ny] = pt(180 - level * step, r - 4);
   let ticks = ""; for (let i = 0; i < n; i++) { const [tx, ty] = pt(180 - i * step, r); ticks += `<circle class="dial-tick ${i === level ? "on" : ""}" data-level="${i}" cx="${tx.toFixed(1)}" cy="${ty.toFixed(1)}" r="5"></circle>`; }
   return `<div class="dialbar" id="${id}">
-    <button class="dial-arrow" data-dir="-1" title="Zoom out">–</button>
+    <button class="dial-arrow" data-dir="-1" title="Zoom out" aria-label="Zoom out">–</button>
     <svg viewBox="0 0 140 46" class="dial-svg" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="${n - 1}" aria-valuenow="${level}" aria-label="Focus: ${esc(labels[level])}">
       <path d="M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}" class="dial-arc"/>
       <line x1="${cx}" y1="${cy}" x2="${nx.toFixed(1)}" y2="${ny.toFixed(1)}" class="dial-needle"/>
       <circle cx="${cx}" cy="${cy}" r="5" class="dial-hub"/>${ticks}
     </svg>
-    <button class="dial-arrow" data-dir="1" title="Zoom in">+</button>
+    <button class="dial-arrow" data-dir="1" title="Zoom in" aria-label="Zoom in">+</button>
     <div class="dial-label">${esc(labels[level])}<small>zoom ${level === 0 ? "· widest" : level === n - 1 ? "· one thing" : ""}</small></div>
   </div>`;
 }

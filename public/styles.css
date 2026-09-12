@@ -7,11 +7,14 @@
   --line-strong: #d2d7de;
   --ink: #1f2430;
   --muted: #5c6470;
-  --faint: #868d99;
+  /* Bumped from #868d99 (~3.0:1) to meet WCAG AA (~4.6:1) — this token carries
+     a lot of small meta text (counts, hints, captions). */
+  --faint: #6b7280;
   --accent: #ea6a1e;
   --accent-strong: #c2410c;
   --accent-purple: #7c3aed;
   --overdue: #b42318;
+  --focus: #6d28d9;
   --shadow-card: 0 1px 2px rgba(20, 20, 40, 0.06);
   --shadow-panel: 0 8px 30px rgba(20, 20, 40, 0.14);
   --nav-w: 240px;
@@ -29,7 +32,20 @@ body {
 a { color: var(--accent-strong); }
 button, select, input, textarea { font: inherit; color: inherit; }
 .boot { padding: 80px; text-align: center; color: var(--muted); }
-:focus-visible { outline: 2px solid var(--accent-purple); outline-offset: -2px; border-radius: 4px; }
+/* Clear, consistent keyboard focus everywhere. A 2px outline plus a soft ring
+   so it reads even against a same-color border or inside a busy row. */
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 6px; box-shadow: 0 0 0 4px rgba(109, 40, 217, 0.18); }
+/* Controls that sit inside overflow:hidden rows can clip an offset outline —
+   pull it inward for those so it's never cut off. */
+.gt td :focus-visible, .cell-sel:focus-visible, .stsel:focus-visible, .priosel:focus-visible, .cell-date input:focus-visible { outline-offset: -2px; box-shadow: none; }
+
+/* Screen-reader-only: visible to assistive tech, off-screen for sighted users. */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* Skip link — hidden until a keyboard user Tabs to it, then jumps past the nav. */
+.skip-link { position: fixed; top: -60px; left: 12px; z-index: 100; background: var(--surface); transition: top .15s; }
+.skip-link:focus-visible { top: 12px; }
+.canvas:focus { outline: none; }
 
 /* ---------------- 3-zone shell ---------------- */
 .shell {
@@ -465,3 +481,35 @@ button, select, input, textarea { font: inherit; color: inherit; }
   /* Keep the last row of content clear of the home indicator + FAB. */
   .canvas { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
 }
+
+/* ---------------- calmer motion & Quiet mode (accessibility) ---------------- */
+/* Honor the OS "Reduce motion" setting: strip transitions, animations, and the
+   little hover lifts that can distract or unsettle motion-sensitive folks. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .ipin:hover, .bcard:hover { transform: none; }
+}
+/* In-app Quiet mode — a lower-stimulation surface anyone can switch on from
+   Settings, independent of the OS setting. Same motion strip, plus softer
+   accents and lighter shadows. Layout is unchanged. */
+:root[data-quiet="1"] *, :root[data-quiet="1"] *::before, :root[data-quiet="1"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+:root[data-quiet="1"] .ipin:hover, :root[data-quiet="1"] .bcard:hover { transform: none; }
+:root[data-quiet="1"] {
+  --bg: #f6f7f8;
+  --accent: #b45a2a;
+  --accent-strong: #a3441f;
+  --accent-purple: #6d5ca8;
+  --shadow-card: 0 1px 1px rgba(20, 20, 40, 0.04);
+  --shadow-panel: 0 6px 20px rgba(20, 20, 40, 0.10);
+}
+/* Mute the loud red "days out" countdown in Quiet mode. */
+:root[data-quiet="1"] .countdown b { color: var(--muted); }
