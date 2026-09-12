@@ -528,7 +528,7 @@ function topbar(party, cd) {
       ${ownerFilter()}
       ${state.view !== "board" ? `<button class="btn small ghost" data-toggle-done>${state.showDone ? "☑ Showing done" : "☐ Show done"}</button>` : ""}
       <div class="viewswitch">
-        ${["grid", "board", "calendar", "timeline", "gantt"].map((v) => `<button class="${state.view === v ? "on" : ""}" data-view="${v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join("")}
+        ${["grid", "board", "calendar", "roadmap", "gantt"].map((v) => `<button class="${state.view === v ? "on" : ""}" data-view="${v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join("")}
       </div>` : ""}
     </div>` : ""}
   </div>`;
@@ -550,7 +550,7 @@ function canvas() {
   if (state.dial === 2) return spotlight();
   if (state.view === "board") return boardView();
   if (state.view === "calendar") return calendarView();
-  if (state.view === "timeline") return timelineView();
+  if (state.view === "roadmap" || state.view === "timeline") return roadmapView();
   if (state.view === "gantt") return ganttView();
   return gridView();
 }
@@ -705,24 +705,65 @@ function calendarView() {
 }
 
 /* ---------------- TIMELINE (by deadline, ungrouped) ---------------- */
-function timelineView() {
+// ROADMAP — a real month-scaled timeline (Planisware/roadmap style): swimlanes
+// by area/phase, tasks as bars on a month grid, party + today as milestones.
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function roadmapView() {
   const tasks = tasksAll().filter((t) => matchesFilter(t) && (state.showDone || t.status !== "done"));
-  const withDate = tasks.filter((t) => t.due_date).sort((a, b) => (a.due_date < b.due_date ? -1 : 1));
+  const dated = tasks.filter((t) => t.due_date);
   const noDate = tasks.filter((t) => !t.due_date);
-  const b = { overdue: [], week: [], month: [], later: [] };
-  withDate.forEach((t) => { const c = countdown(t.due_date); if (!c) return; if (c.days < 0) b.overdue.push(t); else if (c.days <= 7) b.week.push(t); else if (c.days <= 31) b.month.push(t); else b.later.push(t); });
-  const sec = (label, list) => list.length ? `<div class="section-title">${label} · ${list.length}</div><div class="grid-wrap" style="padding:4px 12px;margin-bottom:6px">${list.map(timelineRow).join("")}</div>` : "";
-  const body = sec("⚠️ Overdue", b.overdue) + sec("🔥 This week", b.week) + sec("📅 This month", b.month) + sec("Later", b.later) + sec("No date yet", noDate);
-  return body || `<div class="empty panel" style="margin-top:14px">Nothing scheduled here.</div>`;
-}
-function timelineRow(t) {
-  const a = areaById(t.area_id);
-  return `<div class="fbrow" data-open="${t.id}" style="cursor:pointer;align-items:center">
-    <div style="width:8px;height:38px;border-radius:3px;background:${areaColor(a)};flex:none"></div>
-    <div class="fm"><div style="font-weight:600${t.status === "done" ? ";text-decoration:line-through;color:var(--faint)" : ""}">${esc(t.title)}${t.priority === "high" ? ` <span style="color:#dc2626;font-weight:800">▲</span>` : ""}</div>
-      <div class="meta">${a ? `<span style="color:${areaColor(a)};font-weight:600">${a.emoji || ""} ${esc(a.name)}</span> · ` : ""}${assigneeIdsOf(t).length ? `🧍 ${esc(assigneeLabel(assigneeIdsOf(t)))}` : `<span style="color:var(--accent-strong)">unassigned</span>`} · 📅 ${fmtDate(t.due_date) || "—"}</div></div>
-    <span class="stsel st-${t.status}" style="pointer-events:none">${ST_GLYPH[t.status]} ${ST_LABEL[t.status]}</span>
+  const noDateBlock = noDate.length ? `<div class="section-title" style="margin-top:14px">No date yet · ${noDate.length}</div><div class="grid-wrap" style="padding:6px">${noDate.map((t) => `<div class="ev" style="margin:4px;display:inline-block" data-open="${t.id}">${esc(t.title)}</div>`).join("")}</div>` : "";
+  if (!dated.length) return `<div class="empty panel" style="margin-top:14px"><div class="big">Nothing with a due date yet.</div><div class="meta">Add due dates and they'll lay out on the roadmap.</div></div>${noDateBlock}`;
+
+  const party = state.data.party || {};
+  const DAY = 86400000;
+  const toD = (s) => new Date(s + "T00:00:00");
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const times = dated.map((t) => toD(t.due_date).getTime());
+  if (party.event_date) times.push(toD(party.event_date).getTime());
+  times.push(today.getTime());
+  const min = new Date(Math.min(...times)), max = new Date(Math.max(...times));
+  const startM = new Date(min.getFullYear(), min.getMonth(), 1);
+  const endM = new Date(max.getFullYear(), max.getMonth() + 1, 1); // exclusive
+  const months = []; for (let d = new Date(startM); d < endM; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) months.push(new Date(d));
+  const MONTH_PX = 150, NAME_PX = 190;
+  const trackW = months.length * MONTH_PX;
+  const span = endM.getTime() - startM.getTime();
+  const px = (ms) => ((ms - startM.getTime()) / span) * trackW;
+  const trackBg = `background-image:linear-gradient(90deg, var(--line-strong) 0, var(--line-strong) 1px, transparent 1px);background-size:${MONTH_PX}px 100%;`;
+  const todayPx = px(today.getTime());
+  const partyPx = party.event_date ? px(toD(party.event_date).getTime()) : null;
+  const markers = `${todayPx >= 0 && todayPx <= trackW ? `<div class="gmark gmark-today" style="left:${todayPx.toFixed(1)}px"></div>` : ""}${partyPx != null && partyPx >= 0 && partyPx <= trackW ? `<div class="gmark gmark-party" style="left:${partyPx.toFixed(1)}px"></div>` : ""}`;
+
+  const header = `<div class="rm-row rm-head">
+    <div class="rm-name"></div>
+    <div class="rm-track" style="width:${trackW}px;${trackBg}">${markers}${months.map((d, i) => `<span class="rm-month" style="left:${(i * MONTH_PX)}px;width:${MONTH_PX}px">${MONTH_ABBR[d.getMonth()]} ${String(d.getFullYear()).slice(2)}</span>`).join("")}${partyPx != null ? `<span class="gflag" style="left:${partyPx.toFixed(1)}px">🎃 party</span>` : ""}</div>
   </div>`;
+
+  const row = (t) => {
+    const due = toD(t.due_date).getTime();
+    const leadDays = t.effort_hours ? Math.max(3, Math.round(t.effort_hours / 6)) : 10;
+    const left = px(due - leadDays * DAY), right = px(due);
+    const w = Math.max(14, right - left);
+    const done = t.status === "done";
+    const who = assigneeIdsOf(t).length ? assigneeLabel(assigneeIdsOf(t)) : "";
+    return `<div class="rm-row">
+      <div class="rm-name ${done ? "done" : ""}" data-open="${t.id}" title="${esc(t.title)}">${t.priority === "high" ? `<span style="color:#dc2626">▲ </span>` : ""}${esc(t.title)}</div>
+      <div class="rm-track" style="width:${trackW}px;${trackBg}">${markers}
+        <div class="gbar ${isOverdue(t) ? "overdue" : ""} ${done ? "done" : ""}" data-open="${t.id}" title="${esc(t.title)} · due ${esc(fmtDate(t.due_date))}${who ? " · " + esc(who) : ""}" style="left:${Math.max(0, left).toFixed(1)}px;width:${w.toFixed(1)}px;background:${GANTT_BAR[t.status] || "#94a3b8"}"><span class="gbar-label">${esc(fmtDate(t.due_date))}${who ? " · " + esc(who) : ""}</span></div>
+      </div></div>`;
+  };
+  const areas = state.filter.areaId ? state.data.areas.filter((a) => a.id === state.filter.areaId) : state.data.areas;
+  const groups = areas.map((a) => {
+    const list = dated.filter((t) => t.area_id === a.id).sort((x, y) => (x.due_date < y.due_date ? -1 : 1));
+    if (!list.length) return "";
+    return `<div class="rm-lane"><span class="dot" style="background:${areaColor(a)}"></span> ${a.emoji || ""} ${esc(a.name).toUpperCase()} <span class="gcount">${list.length}</span></div>${list.map(row).join("")}`;
+  }).join("");
+  const orphan = dated.filter((t) => !areas.some((a) => a.id === t.area_id));
+  const orphanBlock = orphan.length ? `<div class="rm-lane"><span class="dot" style="background:#94a3b8"></span> UNFILED <span class="gcount">${orphan.length}</span></div>${orphan.sort((x, y) => (x.due_date < y.due_date ? -1 : 1)).map(row).join("")}` : "";
+
+  return `<div class="gantt-legend"><span class="gl"><i style="background:${GANTT_BAR.todo}"></i>To do</span><span class="gl"><i style="background:${GANTT_BAR.claimed}"></i>Claimed</span><span class="gl"><i style="background:${GANTT_BAR.in_progress}"></i>In progress</span><span class="gl"><i style="background:${GANTT_BAR.blocked}"></i>Blocked</span><span class="gl"><i style="background:${GANTT_BAR.done}"></i>Done</span><span class="gl"><i style="background:var(--accent)"></i>Today</span></div>
+    <div class="gantt-scroll"><div class="rm" style="min-width:${NAME_PX + trackW}px">${header}${groups}${orphanBlock}</div></div>${noDateBlock}`;
 }
 
 /* ---------------- GANTT (bars across a weekly time axis, grouped by area) ---------------- */

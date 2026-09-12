@@ -409,7 +409,9 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .gantt { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
 .gantt-row { display: flex; align-items: stretch; border-top: 1px solid var(--line); }
 .gantt-head { border-top: none; }
-.gantt-name { width: 168px; flex: none; padding: 6px 10px; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; border-right: 1px solid var(--line); display: flex; align-items: center; }
+/* #39: task names were truncated to one clipped line and greyed — hard to read.
+   Wrap to two lines, darker ink, a touch larger. */
+.gantt-name { width: 172px; flex: none; padding: 7px 10px; font-size: 13px; font-weight: 600; color: var(--ink); line-height: 1.22; cursor: pointer; border-right: 1px solid var(--line); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .gantt-name.done { text-decoration: line-through; color: var(--faint); }
 .gantt-head .gantt-name { border-right-color: transparent; }
 .gantt-track { flex: none; position: relative; height: 30px; background-image: linear-gradient(90deg, var(--line) 0, var(--line) 1px, transparent 1px); background-repeat: repeat-x; }
@@ -426,6 +428,21 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .gantt-group-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--surface-2); font-size: 12px; font-weight: 700; letter-spacing: .03em; border-top: 1px solid var(--line); }
 .gantt-group-head .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }
 .gantt-group-head .gcount { color: var(--faint); font-weight: 600; }
+
+/* roadmap (month-scaled timeline / Planisware-style swimlanes) */
+.rm { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.rm-row { display: flex; align-items: stretch; border-top: 1px solid var(--line); }
+.rm-head { border-top: none; position: sticky; top: 0; z-index: 2; background: var(--surface); }
+.rm-name { width: 190px; flex: none; padding: 8px 10px; font-size: 13px; font-weight: 600; color: var(--ink); line-height: 1.25; cursor: pointer; border-right: 1px solid var(--line); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.rm-head .rm-name { border-right-color: transparent; }
+.rm-name.done { text-decoration: line-through; color: var(--faint); }
+.rm-track { flex: none; position: relative; height: 36px; }
+.rm-head .rm-track { height: 28px; }
+.rm-month { position: absolute; top: 7px; font-size: 11px; font-weight: 700; color: var(--muted); text-align: center; text-transform: uppercase; letter-spacing: .04em; }
+.rm-lane { display: flex; align-items: center; gap: 8px; padding: 9px 10px; background: var(--surface-2); font-size: 12px; font-weight: 700; letter-spacing: .03em; border-top: 1px solid var(--line); }
+.rm-lane .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }
+.rm-lane .gcount { color: var(--faint); font-weight: 600; }
+.rm .gbar { top: 8px; height: 20px; }
 
 @media (max-width: 640px) {
   .canvas { padding: 12px; }
