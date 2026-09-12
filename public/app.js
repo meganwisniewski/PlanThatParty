@@ -1500,32 +1500,30 @@ function personVCard(p) {
   lines.push("END:VCARD");
   return lines.join("\r\n");
 }
+// Hand a vCard to the browser WITHOUT forcing a download, so it offers to
+// "Open with Contacts" (one click → Contacts import) instead of dumping a .vcf
+// into some folder you then have to hunt for. Falls back to a download if the
+// browser blocks opening it.
+function openVCard(text, name) {
+  const url = URL.createObjectURL(new Blob([text], { type: "text/vcard;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url; a.target = "_blank"; a.rel = "noopener";
+  a.setAttribute("type", "text/vcard");
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 15000);
+}
 function downloadVCard(id) {
   const p = (state.data.people || []).find((x) => x.id == id);
   if (!p) return;
-  const blob = new Blob([personVCard(p)], { type: "text/vcard;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${(p.name || "contact").replace(/[^a-z0-9]+/gi, "-")}.vcf`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  toast("Opening contact card…");
+  openVCard(personVCard(p), (p.name || "contact"));
+  toast("If asked, choose “Open with Contacts”");
 }
-// One .vcf with the whole crew — open it once to import everyone into Contacts.
+// One vCard with the whole crew — open once to import everyone into Contacts.
 function downloadAllVCards() {
   const people = (state.data.people || []).filter((p) => p.phone || p.email);
   if (!people.length) return toast("No phone/email on file yet");
-  const blob = new Blob([people.map(personVCard).join("\r\n")], { type: "text/vcard;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${((state.data.party && state.data.party.name) || "crew").replace(/[^a-z0-9]+/gi, "-")}-crew.vcf`;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  toast(`${people.length} contacts — open the file to add them all`);
+  openVCard(people.map(personVCard).join("\r\n"), "crew");
+  toast(`${people.length} contacts — choose “Open with Contacts”`);
 }
 
 /* ---------------- SETTINGS ---------------- */
