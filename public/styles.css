@@ -140,6 +140,9 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .cell-sel { border: 1px solid transparent; background: transparent; border-radius: 6px; padding: 4px 6px; width: 100%; cursor: pointer; -webkit-appearance: none; appearance: none; }
 .cell-sel:hover { border-color: var(--line-strong); background: var(--surface); }
 .cell-owner .unassigned { color: var(--accent-strong); }
+.owner-chip { border: 1px solid var(--line-strong); background: var(--surface); border-radius: 999px; padding: 4px 10px; font: inherit; font-size: 13px; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.owner-chip:hover { border-color: var(--accent); }
+.owner-chip.unassigned { color: var(--accent-strong); border-style: dashed; }
 .cell-date input { border: 1px solid transparent; background: transparent; border-radius: 6px; padding: 4px 4px; width: 100%; cursor: pointer; font-size: 13px; }
 .cell-date input:hover { border-color: var(--line-strong); background: var(--surface); }
 .cell-date.overdue input { color: var(--overdue); font-weight: 600; }

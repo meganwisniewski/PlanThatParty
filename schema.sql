@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS events (
   end_time    TEXT,
   location    TEXT,
   notes       TEXT,
-  assignee_id INTEGER REFERENCES people(id) ON DELETE SET NULL, -- who's hosting / running it
+  assignee_id INTEGER REFERENCES people(id) ON DELETE SET NULL, -- primary host (legacy/fallback)
+  assignee_ids TEXT,          -- CSV of people ids co-hosting
   sort_order  INTEGER DEFAULT 0,
   created_at  TEXT DEFAULT (datetime('now'))
 );
@@ -98,7 +99,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   effort_hours REAL,                         -- estimated hours
   core        INTEGER DEFAULT 0,             -- load-bearing task flag
   tags        TEXT,                          -- free-form CSV tags (e.g. "vendor sourcing")
-  assignee_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+  assignee_id INTEGER REFERENCES people(id) ON DELETE SET NULL, -- primary owner (legacy/fallback)
+  assignee_ids TEXT,                         -- CSV of people ids co-owning this task
   created_at  TEXT DEFAULT (datetime('now'))
 );
 
@@ -109,7 +111,8 @@ CREATE TABLE IF NOT EXISTS supplies (
   quantity       TEXT,
   estimated_cost REAL,
   status         TEXT DEFAULT 'needed',      -- needed | claimed | purchased
-  assignee_id    INTEGER REFERENCES people(id) ON DELETE SET NULL,
+  assignee_id    INTEGER REFERENCES people(id) ON DELETE SET NULL, -- primary owner (legacy/fallback)
+  assignee_ids   TEXT,                       -- CSV of people ids co-owning this supply
   notes          TEXT,
   link           TEXT,                       -- where to source it (a shop/product URL)
   created_at     TEXT DEFAULT (datetime('now'))

@@ -216,6 +216,20 @@ function parseGuestLines(text) {
   }).filter((g) => g.name);
 }
 
+// Normalize assignee input (accepts `assignee_ids` as array/CSV, or a single
+// legacy `assignee_id`) into a deduped CSV + the primary (first) id.
+function normAssignees(b) {
+  let ids;
+  if (b.assignee_ids !== undefined) ids = Array.isArray(b.assignee_ids) ? b.assignee_ids : String(b.assignee_ids || "").split(",");
+  else if (b.assignee_id !== undefined) ids = (b.assignee_id === null || b.assignee_id === "") ? [] : [b.assignee_id];
+  else return null;
+  ids = [...new Set(ids.map((x) => parseInt(x, 10)).filter((x) => Number.isInteger(x) && x > 0))];
+  return { csv: ids.length ? ids.join(",") : null, first: ids.length ? ids[0] : null };
+}
+// SQL: does bound person id (?) appear among a row's owners? Checks the CSV
+// assignee_ids, falling back to the legacy single assignee_id.
+const memberSQL = (a = "") => { const c = a ? a + "." : ""; return `instr(',' || COALESCE(${c}assignee_ids, CAST(${c}assignee_id AS TEXT), '') || ',', ',' || ? || ',') > 0`; };
+
 async function api(request, env, path) {
   const method = request.method;
   const seg = path.split("/").filter(Boolean); // e.g. ["api","people","3"]
@@ -235,18 +249,18 @@ async function api(request, env, path) {
         await env.DB.prepare(
           `SELECT t.*, a.name AS area_name, a.emoji AS area_emoji
              FROM tasks t LEFT JOIN areas a ON a.id = t.area_id
-            WHERE t.assignee_id = ? ORDER BY t.status, t.due_date`
+            WHERE ${memberSQL("t")} ORDER BY t.status, t.due_date`
         )
-          .bind(person.id)
+          .bind(String(person.id))
           .all()
       ).results;
       const supplies = (
         await env.DB.prepare(
           `SELECT s.*, a.name AS area_name, a.emoji AS area_emoji
              FROM supplies s LEFT JOIN areas a ON a.id = s.area_id
-            WHERE s.assignee_id = ? ORDER BY s.status`
+            WHERE ${memberSQL("s")} ORDER BY s.status`
         )
-          .bind(person.id)
+          .bind(String(person.id))
           .all()
       ).results;
       const pc = partyClient(party);
@@ -277,7 +291,7 @@ async function api(request, env, path) {
       const party = await getParty(env);
       const alarms = reminderList(person.reminder_minutes || "");
       const events = [partyEvent(party, alarms)];
-      const dueTasks = (await env.DB.prepare("SELECT * FROM tasks WHERE assignee_id = ? AND due_date IS NOT NULL AND status != 'done'").bind(person.id).all()).results;
+      const dueTasks = (await env.DB.prepare(`SELECT * FROM tasks WHERE ${memberSQL()} AND due_date IS NOT NULL AND status != 'done'`).bind(String(person.id)).all()).results;
       for (const t of dueTasks) {
         const [ty, tm, td] = t.due_date.split("-").map(Number);
         const nd = new Date(Date.UTC(ty, tm - 1, td + 1));
@@ -300,9 +314,9 @@ async function api(request, env, path) {
       const ok = ["todo", "claimed", "in_progress", "blocked", "done"];
       if (!ok.includes(status)) return err("Bad status.");
       await env.DB.prepare(
-        "UPDATE tasks SET status = ? WHERE id = ? AND assignee_id = ?"
+        `UPDATE tasks SET status = ? WHERE id = ? AND ${memberSQL()}`
       )
-        .bind(status, seg[4], person.id)
+        .bind(status, seg[4], String(person.id))
         .run();
       return json({ ok: true });
     }
@@ -313,9 +327,9 @@ async function api(request, env, path) {
       const ok = ["needed", "claimed", "purchased"];
       if (!ok.includes(status)) return err("Bad status.");
       await env.DB.prepare(
-        "UPDATE supplies SET status = ? WHERE id = ? AND assignee_id = ?"
+        `UPDATE supplies SET status = ? WHERE id = ? AND ${memberSQL()}`
       )
-        .bind(status, seg[4], person.id)
+        .bind(status, seg[4], String(person.id))
         .run();
       return json({ ok: true });
     }
@@ -485,9 +499,10 @@ async function api(request, env, path) {
       const idea = await env.DB.prepare("SELECT * FROM ideas WHERE id = ?").bind(id).first();
       if (!idea) return err("No such idea.", 404);
       const b = await body(request);
+      const na = normAssignees(b) || { csv: null, first: null };
       const r = await env.DB.prepare(
-        `INSERT INTO tasks (area_id, title, description, status, priority, due_date, assignee_id) VALUES (?,?,?,?,?,?,?)`
-      ).bind(b.area_id || idea.area_id || null, idea.title, idea.description || null, "todo", b.priority || "normal", b.due_date || null, b.assignee_id || null).run();
+        `INSERT INTO tasks (area_id, title, description, status, priority, due_date, assignee_id, assignee_ids) VALUES (?,?,?,?,?,?,?,?)`
+      ).bind(b.area_id || idea.area_id || null, idea.title, idea.description || null, "todo", b.priority || "normal", b.due_date || null, na.first, na.csv).run();
       const taskId = r.meta.last_row_id;
       await env.DB.prepare("UPDATE ideas SET stage = 'promoted', promoted_task_id = ? WHERE id = ?").bind(taskId, id).run();
       return json({ ok: true, task_id: taskId });
@@ -640,7 +655,7 @@ async function api(request, env, path) {
   if (resource === "events") {
     const gate = await requireAdmin(request, env);
     if (gate) return gate;
-    const EV_FIELDS = ["title", "kind", "event_date", "start_time", "end_time", "location", "notes", "sort_order", "assignee_id"];
+    const EV_FIELDS = ["title", "kind", "event_date", "start_time", "end_time", "location", "notes", "sort_order", "assignee_id", "assignee_ids"];
     if (method === "GET") {
       const rows = (await env.DB.prepare("SELECT e.*, p.name AS assignee_name FROM events e LEFT JOIN people p ON p.id = e.assignee_id ORDER BY (e.event_date IS NULL), e.event_date, e.start_time, e.sort_order, e.id").all()).results;
       return json(rows);
@@ -654,13 +669,15 @@ async function api(request, env, path) {
         return json({ ok: true, added: n }, 201);
       }
       if (!b.title || !b.title.trim()) return err("Event name required.");
+      const na = normAssignees(b) || { csv: null, first: null };
       const r = await env.DB.prepare(
-        "INSERT INTO events (title, kind, event_date, start_time, end_time, location, notes, sort_order, assignee_id) VALUES (?,?,?,?,?,?,?,?,?)"
-      ).bind(b.title.trim(), b.kind || null, b.event_date || null, b.start_time || null, b.end_time || null, b.location || null, b.notes || null, b.sort_order || 0, b.assignee_id || null).run();
+        "INSERT INTO events (title, kind, event_date, start_time, end_time, location, notes, sort_order, assignee_id, assignee_ids) VALUES (?,?,?,?,?,?,?,?,?,?)"
+      ).bind(b.title.trim(), b.kind || null, b.event_date || null, b.start_time || null, b.end_time || null, b.location || null, b.notes || null, b.sort_order || 0, na.first, na.csv).run();
       return json({ id: r.meta.last_row_id }, 201);
     }
     if (method === "PATCH" && id) {
       const b = await body(request);
+      if ("assignee_ids" in b || "assignee_id" in b) { const na = normAssignees(b); b.assignee_id = na.first; b.assignee_ids = na.csv; }
       await updateRow(env, "events", id, pick(b, EV_FIELDS));
       return json({ ok: true });
     }
@@ -904,9 +921,10 @@ async function api(request, env, path) {
     if (method === "POST") {
       const b = await body(request);
       if (!b.title) return err("Title required.");
+      const na = normAssignees(b) || { csv: null, first: null };
       const r = await env.DB.prepare(
-        `INSERT INTO tasks (area_id, parent_id, title, description, status, priority, due_date, percent, links_field, assignee_id, tags)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+        `INSERT INTO tasks (area_id, parent_id, title, description, status, priority, due_date, percent, links_field, assignee_id, assignee_ids, tags)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
       )
         .bind(
           b.area_id || null,
@@ -918,7 +936,8 @@ async function api(request, env, path) {
           b.due_date || null,
           b.percent || 0,
           b.links_field || null,
-          b.assignee_id || null,
+          na.first,
+          na.csv,
           normalizeTags(b.tags)
         )
         .run();
@@ -927,11 +946,12 @@ async function api(request, env, path) {
     if (method === "PATCH" && id) {
       const b = await body(request);
       if ("tags" in b) b.tags = normalizeTags(b.tags);
+      if ("assignee_ids" in b || "assignee_id" in b) { const na = normAssignees(b); b.assignee_id = na.first; b.assignee_ids = na.csv; }
       await updateRow(
         env,
         "tasks",
         id,
-        pick(b, ["area_id", "parent_id", "title", "description", "status", "priority", "due_date", "percent", "links_field", "assignee_id", "tags"])
+        pick(b, ["area_id", "parent_id", "title", "description", "status", "priority", "due_date", "percent", "links_field", "assignee_id", "assignee_ids", "tags"])
       );
       return json({ ok: true });
     }
@@ -949,9 +969,10 @@ async function api(request, env, path) {
     if (method === "POST") {
       const b = await body(request);
       if (!b.item) return err("Item required.");
+      const na = normAssignees(b) || { csv: null, first: null };
       const r = await env.DB.prepare(
-        `INSERT INTO supplies (area_id, item, quantity, estimated_cost, status, assignee_id, notes, link)
-         VALUES (?,?,?,?,?,?,?,?)`
+        `INSERT INTO supplies (area_id, item, quantity, estimated_cost, status, assignee_id, assignee_ids, notes, link)
+         VALUES (?,?,?,?,?,?,?,?,?)`
       )
         .bind(
           b.area_id || null,
@@ -959,7 +980,8 @@ async function api(request, env, path) {
           b.quantity || null,
           b.estimated_cost != null ? b.estimated_cost : null,
           b.status || "needed",
-          b.assignee_id || null,
+          na.first,
+          na.csv,
           b.notes || null,
           b.link ? normalizeUrl(b.link) : null
         )
@@ -969,11 +991,12 @@ async function api(request, env, path) {
     if (method === "PATCH" && id) {
       const b = await body(request);
       if ("link" in b) b.link = b.link ? normalizeUrl(b.link) : null;
+      if ("assignee_ids" in b || "assignee_id" in b) { const na = normAssignees(b); b.assignee_id = na.first; b.assignee_ids = na.csv; }
       await updateRow(
         env,
         "supplies",
         id,
-        pick(b, ["area_id", "item", "quantity", "estimated_cost", "status", "assignee_id", "notes", "link"])
+        pick(b, ["area_id", "item", "quantity", "estimated_cost", "status", "assignee_id", "assignee_ids", "notes", "link"])
       );
       return json({ ok: true });
     }

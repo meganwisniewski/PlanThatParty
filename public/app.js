@@ -248,10 +248,10 @@ function matchesFilter(t) {
   if (f.q) { const q = f.q.toLowerCase(); if (!((t.title || "").toLowerCase().includes(q) || (t.description || "").toLowerCase().includes(q))) return false; }
   // Owner filter combines (AND) with area/saved/tag: "only mine" resolves to
   // whoever is set in "I'm posting as"; a specific id filters to that person.
-  if (f.assignee) { const who = f.assignee === "me" ? getHostId() : f.assignee; if (who && t.assignee_id != who) return false; }
+  if (f.assignee) { const who = f.assignee === "me" ? getHostId() : f.assignee; if (who && !assigneeIdsOf(t).includes(Number(who))) return false; }
   if (f.tag) return taskTags(t).includes(f.tag);
   if (f.areaId) return t.area_id == f.areaId;
-  if (f.saved === "unassigned") return !t.assignee_id && t.status !== "done";
+  if (f.saved === "unassigned") return !assigneeIdsOf(t).length && t.status !== "done";
   if (f.saved === "blocked") return t.status === "blocked";
   if (f.saved === "week") { const c = countdown(t.due_date); return c && c.days >= 0 && c.days <= 7; }
   return true;
@@ -416,7 +416,7 @@ function sidebar() {
   };
   const viewItem = (key, emoji, label, count) =>
     `<button class="nav-item ${state.screen === "work" && state.filter.saved === key ? "active" : ""}" data-saved="${key}"><span class="emoji">${emoji}</span> ${label}${count != null ? `<span class="count">${count}</span>` : ""}</button>`;
-  const unassigned = tasksAll().filter((t) => !t.assignee_id && t.status !== "done").length;
+  const unassigned = tasksAll().filter((t) => !assigneeIdsOf(t).length && t.status !== "done").length;
   const blocked = tasksAll().filter((t) => t.status === "blocked").length;
   return `
   <nav class="nav ${state.navOpen ? "open" : ""}">
@@ -561,10 +561,51 @@ function taskRow(t, n, depth) {
     <td class="c-pct"><div class="pctcell"><span class="pct-track"><div style="width:${p}%"></div></span><span class="pct-num">${p}%</span></div></td>
   </tr>`;
 }
-function ownerSelect(t) {
-  const opts = `<option value="">Unassigned</option>` + state.data.people.map((p) => `<option value="${p.id}" ${t.assignee_id == p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("");
-  return `<select class="cell-sel cell-owner ${!t.assignee_id ? "unassigned" : ""}" data-owner="${t.id}">${opts}</select>`;
+// ---- multi-assignee helpers ----
+// A row's owners as an array of ids (CSV assignee_ids, falling back to the
+// legacy single assignee_id).
+function assigneeIdsOf(row) {
+  if (!row) return [];
+  if (row.assignee_ids) return String(row.assignee_ids).split(",").map((x) => Number(x)).filter(Boolean);
+  return row.assignee_id ? [Number(row.assignee_id)] : [];
 }
+function assigneeNames(ids) { return ids.map((id) => (personById(id) || {}).name).filter(Boolean); }
+function assigneeLabel(ids) { const n = assigneeNames(ids); if (!n.length) return ""; if (n.length <= 2) return n.join(", "); return n[0] + " +" + (n.length - 1); }
+const ASSIGN_EP = { task: "tasks", supply: "supplies", event: "events" };
+function findAssignRow(kind, id) {
+  const d = state.data; id = Number(id);
+  if (kind === "task") return (tasksAll() || []).find((t) => t.id === id) || (d.tasks || []).find((t) => t.id === id);
+  if (kind === "supply") return (d.supplies || []).find((s) => s.id === id);
+  if (kind === "event") return (d.events || []).find((e) => e.id === id);
+  return null;
+}
+// A compact clickable "owners" control used in tables/cards/panels.
+function ownerChip(kind, row) {
+  const ids = assigneeIdsOf(row); const lbl = ids.length ? assigneeLabel(ids) : "＋ Assign";
+  return `<button type="button" class="owner-chip ${ids.length ? "" : "unassigned"}" data-assign="${kind}:${row.id}" title="Assign people">${esc(lbl)}</button>`;
+}
+function openAssignPicker(kind, id, ids) {
+  const cur = new Set((ids || []).map(Number));
+  const people = state.data.people || [];
+  const inp = "display:flex;align-items:center;gap:10px;padding:8px 6px;border-radius:8px;cursor:pointer";
+  const close = modal(`<h3>Assign people</h3><p class="hint">Pick everyone responsible — it shows up in each of their private links, and they can update its status from there.</p>
+    <div style="display:flex;flex-direction:column;gap:2px;max-height:52vh;overflow:auto">${people.length ? people.map((p) => `<label style="${inp}"><input type="checkbox" data-apick="${p.id}" ${cur.has(p.id) ? "checked" : ""} style="width:18px;height:18px;flex:none"/> ${avatarHtml(p, 26)} <span>${esc(p.name)}${p.role && p.role !== "volunteer" ? ` <span class="meta">· ${esc(p.role)}</span>` : ""}</span></label>`).join("") : `<div class="empty">Add people on the People page first.</div>`}</div>`,
+    async () => {
+      const sel = [...box.querySelectorAll("[data-apick]:checked")].map((c) => Number(c.dataset.apick));
+      await patch("/api/" + ASSIGN_EP[kind] + "/" + id, { assignee_ids: sel });
+      await refresh(); render(); toast(sel.length ? "Assigned" : "Unassigned");
+    });
+  const box = close.el;
+}
+function ownerSelect(t) { return ownerChip("task", t); }
+// Inline multi-owner checklist for use inside form modals (task create/edit).
+function ownerChecklist(selectedIds, attr) {
+  const sel = new Set((selectedIds || []).map(Number));
+  const people = state.data.people || [];
+  if (!people.length) return `<div class="hint">Add people on the People page first.</div>`;
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px;max-height:140px;overflow:auto">${people.map((p) => `<label style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line-strong);border-radius:999px;padding:4px 10px;cursor:pointer;font-size:13px"><input type="checkbox" data-${attr}="${p.id}" ${sel.has(p.id) ? "checked" : ""} style="width:15px;height:15px"/> ${esc(p.name)}</label>`).join("")}</div>`;
+}
+const checkedIds = (attr) => [...document.querySelectorAll(`[data-${attr}]:checked`)].map((c) => Number(c.dataset[attr.replace(/-([a-z])/g, (m, c2) => c2.toUpperCase())]));
 function statusSelect(t) {
   const opts = STATUSES.map((s) => `<option value="${s}" ${s === t.status ? "selected" : ""}>${ST_GLYPH[s]} ${ST_LABEL[s]}</option>`).join("");
   return `<select class="stsel st-${t.status}" data-status="${t.id}">${opts}</select>`;
@@ -582,7 +623,7 @@ function boardView() {
     return `<div class="board-col"><h3>${ST_GLYPH[s]} ${ST_LABEL[s]} <span>${col.length}</span></h3>
       ${col.map((t) => `<div class="bcard" data-open="${t.id}">
         <div class="bt">${esc(t.title)}</div>
-        <div class="brow">${t.area_emoji ? `<span>${t.area_emoji}</span>` : ""}${t.assignee_name ? `<span>🧍 ${esc(t.assignee_name)}</span>` : `<span style="color:var(--accent-strong)">unassigned</span>`}${t.due_date ? `<span>📅 ${fmtDate(t.due_date)}</span>` : ""}</div>
+        <div class="brow">${t.area_emoji ? `<span>${t.area_emoji}</span>` : ""}${assigneeIdsOf(t).length ? `<span>🧍 ${esc(assigneeLabel(assigneeIdsOf(t)))}</span>` : `<span style="color:var(--accent-strong)">unassigned</span>`}${t.due_date ? `<span>📅 ${fmtDate(t.due_date)}</span>` : ""}</div>
       </div>`).join("") || `<div class="empty" style="padding:10px;font-size:12px">—</div>`}
     </div>`;
   }).join("")}</div>`;
@@ -631,7 +672,7 @@ function timelineRow(t) {
   return `<div class="fbrow" data-open="${t.id}" style="cursor:pointer;align-items:center">
     <div style="width:8px;height:38px;border-radius:3px;background:${areaColor(a)};flex:none"></div>
     <div class="fm"><div style="font-weight:600${t.status === "done" ? ";text-decoration:line-through;color:var(--faint)" : ""}">${esc(t.title)}${t.priority === "high" ? ` <span style="color:#dc2626;font-weight:800">▲</span>` : ""}</div>
-      <div class="meta">${a ? `<span style="color:${areaColor(a)};font-weight:600">${a.emoji || ""} ${esc(a.name)}</span> · ` : ""}${t.assignee_name ? `🧍 ${esc(t.assignee_name)}` : `<span style="color:var(--accent-strong)">unassigned</span>`} · 📅 ${fmtDate(t.due_date) || "—"}</div></div>
+      <div class="meta">${a ? `<span style="color:${areaColor(a)};font-weight:600">${a.emoji || ""} ${esc(a.name)}</span> · ` : ""}${assigneeIdsOf(t).length ? `🧍 ${esc(assigneeLabel(assigneeIdsOf(t)))}` : `<span style="color:var(--accent-strong)">unassigned</span>`} · 📅 ${fmtDate(t.due_date) || "—"}</div></div>
     <span class="stsel st-${t.status}" style="pointer-events:none">${ST_GLYPH[t.status]} ${ST_LABEL[t.status]}</span>
   </div>`;
 }
@@ -703,7 +744,7 @@ function overview() {
   const d = state.data, party = d.party || {}, tasks = tasksAll();
   const done = tasks.filter((t) => t.status === "done").length;
   const pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
-  const unassigned = tasks.filter((t) => !t.assignee_id && t.status !== "done").length;
+  const unassigned = tasks.filter((t) => !assigneeIdsOf(t).length && t.status !== "done").length;
   const blocked = tasks.filter((t) => t.status === "blocked").length;
   const cd = countdown(party.event_date);
   const budget = d.supplies.reduce((s, x) => s + (Number(x.estimated_cost) || 0), 0);
@@ -810,7 +851,7 @@ function panel() {
       <label class="field"><span>Details</span><textarea id="pDesc" rows="2">${esc(t.description || "")}</textarea></label>
       <div class="field two">
         <label><span>Area</span><select id="pArea">${areaOpts}</select></label>
-        <label><span>Owner</span><select id="pOwner">${ownerOpts}</select></label>
+        <label><span>Owner(s)</span><div style="padding-top:2px">${ownerChip("task", t)}</div></label>
       </div>
       <div class="field two">
         <label><span>Status</span><select id="pStatus">${stOpts}</select></label>
@@ -1114,7 +1155,7 @@ function eventsView() {
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h3 style="margin:0;font-size:15px">${esc(e.title)}</h3>${e.kind ? `<span class="chip">${esc(EK_LABEL[e.kind] || e.kind)}</span>` : ""}</div>
         <div class="evwhen">🗓️ ${when}${time ? ` · ⏰ ${time}` : ""}${e.location ? ` · 📍 ${esc(e.location)}` : ""}</div>
-        ${e.assignee_name ? `<div class="evwhen">🧑 Hosted by <b>${esc(e.assignee_name)}</b></div>` : ""}
+        ${assigneeIdsOf(e).length ? `<div class="evwhen">🧑 Hosted by <b>${esc(assigneeLabel(assigneeIdsOf(e)))}</b></div>` : ""}
         ${e.notes ? `<div class="evnotes">${esc(e.notes)}</div>` : ""}
         <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
           <button class="btn small ghost" data-edit-event="${e.id}">Edit</button>
@@ -1138,16 +1179,15 @@ function eventsView() {
 function openEventModal(id) {
   const e = id ? (state.data.events || []).find((x) => x.id == id) || {} : {};
   const kindOpts = `<option value="">—</option>` + EVENT_KINDS.map(([k, em, l]) => `<option value="${k}" ${e.kind === k ? "selected" : ""}>${em} ${l}</option>`).join("");
-  const whoOpts = `<option value="">— nobody yet —</option>` + (state.data.people || []).map((p) => `<option value="${p.id}" ${e.assignee_id == p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("");
   modal(`<h3>${id ? "Edit event" : "Add event"}</h3>
     <label class="field"><span>Name</span><input id="evName" value="${esc(e.title || "")}" placeholder="e.g. Pumpkin carving day"/></label>
     <div class="field two"><label><span>Type</span><select id="evKind">${kindOpts}</select></label><label><span>Date</span><input id="evDate" type="date" value="${esc(e.event_date || "")}"/></label></div>
     <div class="field two"><label><span>Start time</span><input id="evStart" value="${esc(e.start_time || "")}" placeholder="e.g. 6:00 PM"/></label><label><span>End time</span><input id="evEnd" value="${esc(e.end_time || "")}" placeholder="optional"/></label></div>
-    <label class="field"><span>Who's hosting / running it</span><select id="evWho">${whoOpts}</select></label>
+    <label class="field"><span>Who's hosting / running it <span style="color:var(--faint);font-weight:400">— pick any number</span></span>${ownerChecklist(assigneeIdsOf(e), "evwho")}</label>
     <label class="field"><span>Location</span><input id="evLoc" value="${esc(e.location || "")}" placeholder="optional"/></label>
     <label class="field"><span>Notes</span><textarea id="evNotes" rows="2" placeholder="What's happening, what to bring…">${esc(e.notes || "")}</textarea></label>`,
     async () => {
-      const payload = { title: $("#evName").value.trim(), kind: $("#evKind").value || null, event_date: $("#evDate").value || null, start_time: $("#evStart").value.trim() || null, end_time: $("#evEnd").value.trim() || null, assignee_id: $("#evWho").value || null, location: $("#evLoc").value.trim() || null, notes: $("#evNotes").value.trim() || null };
+      const payload = { title: $("#evName").value.trim(), kind: $("#evKind").value || null, event_date: $("#evDate").value || null, start_time: $("#evStart").value.trim() || null, end_time: $("#evEnd").value.trim() || null, assignee_ids: checkedIds("evwho"), location: $("#evLoc").value.trim() || null, notes: $("#evNotes").value.trim() || null };
       if (!payload.title) return toast("Add a name");
       if (id) await patch("/api/events/" + id, payload); else await post("/api/events", payload);
       await refresh(); render(); toast("Saved");
@@ -1237,7 +1277,6 @@ function sourcingView() {
 function supplyRow(s) {
   const d = state.data;
   const areaOpts = `<option value="">— zone —</option>` + d.areas.map((a) => `<option value="${a.id}" ${s.area_id == a.id ? "selected" : ""}>${a.emoji || ""} ${esc(a.name)}</option>`).join("");
-  const whoOpts = `<option value="">— who —</option>` + d.people.map((p) => `<option value="${p.id}" ${s.assignee_id == p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("");
   const stColor = SS_COLOR[s.status] || "";
   const rows = Math.min(5, Math.max(1, Math.ceil((s.item || "").length / 26)));
   return `<div class="pcard" style="padding:10px 12px">
@@ -1246,7 +1285,7 @@ function supplyRow(s) {
       <select data-sstatus="${s.id}" style="${SUP_INP};color:${stColor}">${SUPPLY_STATUS.map(([v, l]) => `<option value="${v}" ${s.status === v ? "selected" : ""}>${l}</option>`).join("")}</select>
       <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px">Qty <input data-sqty="${s.id}" value="${esc(s.quantity || "")}" style="width:56px;${SUP_INP}"/></label>
       <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px">$ <input type="number" inputmode="decimal" data-scost="${s.id}" value="${s.estimated_cost != null ? s.estimated_cost : ""}" style="width:70px;${SUP_INP}"/></label>
-      <select data-swho="${s.id}" style="${SUP_INP};flex:1;min-width:110px">${whoOpts}</select>
+      <span style="flex:1;min-width:110px;display:flex">${ownerChip("supply", s)}</span>
       <select data-sarea="${s.id}" style="${SUP_INP};flex:1;min-width:110px">${areaOpts}</select>
       <button class="btn ghost small danger" data-sdel="${s.id}">Remove</button>
     </div>
@@ -1257,13 +1296,12 @@ function supplyRow(s) {
 function supplyCard(s) {
   const d = state.data;
   const areaOpts = `<option value="">— zone —</option>` + d.areas.map((a) => `<option value="${a.id}" ${s.area_id == a.id ? "selected" : ""}>${a.emoji || ""} ${esc(a.name)}</option>`).join("");
-  const whoOpts = `<option value="">— who —</option>` + d.people.map((p) => `<option value="${p.id}" ${s.assignee_id == p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("");
   return `<div class="pcard">
     <div style="display:flex;gap:8px;align-items:center"><input data-sitem="${s.id}" value="${esc(s.item)}" style="flex:1;min-width:0;font-weight:600;${SUP_INP}"/><select data-sstatus="${s.id}" style="${SUP_INP};color:${SS_COLOR[s.status] || ""}">${SUPPLY_STATUS.map(([v, l]) => `<option value="${v}" ${s.status === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
       <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px">Qty <input data-sqty="${s.id}" value="${esc(s.quantity || "")}" style="width:56px;${SUP_INP}"/></label>
       <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px">$ <input type="number" inputmode="decimal" data-scost="${s.id}" value="${s.estimated_cost != null ? s.estimated_cost : ""}" style="width:74px;${SUP_INP}"/></label>
-      <select data-swho="${s.id}" style="${SUP_INP};flex:1;min-width:0">${whoOpts}</select>
+      <span style="flex:1;min-width:0;display:flex">${ownerChip("supply", s)}</span>
       <select data-sarea="${s.id}" style="${SUP_INP};flex:1;min-width:0">${areaOpts}</select>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-top:8px">🔗<input data-slink="${s.id}" value="${esc(s.link || "")}" placeholder="Where to buy — paste a link" style="flex:1;min-width:0;${SUP_INP}"/>${s.link ? `<a class="btn small ghost" href="${esc(s.link)}" target="_blank" rel="noopener">Open</a>` : ""}</div>
@@ -1433,7 +1471,7 @@ function peopleView() {
   <div class="cards">${d.people.length ? d.people.map(personCard).join("") : `<div class="empty">No one yet — add your co-hosts and volunteers.</div>`}</div>`;
 }
 function personCard(p) {
-  const n = tasksAll().filter((t) => t.assignee_id == p.id).length;
+  const n = tasksAll().filter((t) => assigneeIdsOf(t).includes(p.id)).length;
   return `<div class="pcard">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${avatarHtml(p, 46)}<h3>${esc(p.name)}</h3>${p.role && p.role !== "volunteer" ? `<span class="role">${esc(p.role)}</span>` : ""}${p.is_approver ? `<span class="role" style="background:#f3efff;color:var(--accent-purple)">✓ Approver</span>` : ""}<div class="grow"></div><button class="btn ghost small" data-edit-person="${p.id}">Edit</button></div>
     <div class="chan">Prefers <b>${channelLabel(p.preferred_channel)}</b>${p.platform ? ` · ${esc(PLATFORMS[p.platform] || p.platform)}` : ""}</div>
@@ -1557,7 +1595,7 @@ function wireCanvas() {
   appEl.querySelectorAll("[data-open]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); selectTask(Number(b.dataset.open), true); }));
   appEl.querySelectorAll("[data-open-fact]").forEach((b) => (b.onclick = () => { const t = tasksAll().find((x) => x.links_field === b.dataset.openFact); if (t) selectTask(t.id, true); else { state.screen = "settings"; render(); } }));
   // inline edits
-  appEl.querySelectorAll("[data-owner]").forEach((s) => (s.onchange = async (e) => { await patch("/api/tasks/" + s.dataset.owner, { assignee_id: e.target.value || null }); await refresh(); render(); }));
+  appEl.querySelectorAll("[data-assign]").forEach((b) => (b.onclick = () => { const [kind, aid] = b.dataset.assign.split(":"); openAssignPicker(kind, Number(aid), assigneeIdsOf(findAssignRow(kind, aid))); }));
   appEl.querySelectorAll("[data-status]").forEach((s) => (s.onchange = async (e) => { await patch("/api/tasks/" + s.dataset.status, { status: e.target.value }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-prio]").forEach((s) => (s.onchange = async (e) => { await patch("/api/tasks/" + s.dataset.prio, { priority: e.target.value }); const t = tasksAll().find((x) => x.id == s.dataset.prio); if (t) t.priority = e.target.value; render(); }));
   appEl.querySelectorAll("[data-due]").forEach((i) => (i.onchange = async (e) => { await patch("/api/tasks/" + i.dataset.due, { due_date: e.target.value || null }); const t = tasksAll().find((x) => x.id == i.dataset.due); if (t) t.due_date = e.target.value || null; render(); }));
@@ -1614,7 +1652,6 @@ function wireCanvas() {
   appEl.querySelectorAll("[data-sstatus]").forEach((s) => (s.onchange = async () => { await patch("/api/supplies/" + s.dataset.sstatus, { status: s.value }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-sqty]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.sqty, { quantity: i.value.trim() || null }); }));
   appEl.querySelectorAll("[data-scost]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.scost, { estimated_cost: i.value ? Number(i.value) : null }); await refresh(); render(); }));
-  appEl.querySelectorAll("[data-swho]").forEach((s) => (s.onchange = async () => { await patch("/api/supplies/" + s.dataset.swho, { assignee_id: s.value || null }); }));
   appEl.querySelectorAll("[data-sarea]").forEach((s) => (s.onchange = async () => { await patch("/api/supplies/" + s.dataset.sarea, { area_id: s.value || null }); }));
   appEl.querySelectorAll("[data-slink]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.slink, { link: i.value.trim() || null }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-snotes]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.snotes, { notes: i.value.trim() || null }); }));
@@ -1652,7 +1689,7 @@ function wirePanel() {
   const pc = $("[data-panel-close]"); if (pc) pc.onclick = () => { state.panelOpen = false; render(); };
   const commit = async (field, val) => { await patch("/api/tasks/" + state.selectedTaskId, { [field]: val }); await refresh(); render(); };
   const bind = (sel, field, transform) => { const el = $(sel); if (el) el.onchange = () => commit(field, transform ? transform(el.value) : (el.value || null)); };
-  bind("#pTitle", "title"); bind("#pDesc", "description"); bind("#pArea", "area_id", (v) => v || null); bind("#pOwner", "assignee_id", (v) => v || null);
+  bind("#pTitle", "title"); bind("#pDesc", "description"); bind("#pArea", "area_id", (v) => v || null);
   bind("#pStatus", "status"); bind("#pPrio", "priority"); bind("#pDue", "due_date", (v) => v || null); bind("#pPct", "percent", (v) => Number(v) || 0);
   bind("#pTags", "tags", (v) => v.trim() || null);
   appEl.querySelectorAll("[data-tagfilter]").forEach((b) => (b.onclick = () => { state.panelOpen = false; state.screen = "work"; state.dial = 1; state.filter = { areaId: null, saved: null, tag: b.dataset.tagfilter, q: "" }; render(); }));
@@ -1757,15 +1794,15 @@ function modal(inner, onSave, opts = {}) {
 function openTaskModal(id, presetArea) {
   const d = state.data, t = id ? tasksAll().find((x) => x.id == id) : {};
   const areaOpts = `<option value="">— area —</option>` + d.areas.map((a) => `<option value="${a.id}" ${(t.area_id || presetArea) == a.id ? "selected" : ""}>${a.emoji || ""} ${esc(a.name)}</option>`).join("");
-  const ownerOpts = `<option value="">Unassigned</option>` + d.people.map((p) => `<option value="${p.id}" ${t.assignee_id == p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("");
   modal(`<h3>${id ? "Edit task" : "New task"}</h3>
     <label class="field"><span>Title</span><input id="mTitle" value="${esc(t.title || "")}" placeholder="What needs doing?"/></label>
     <label class="field"><span>Details</span><textarea id="mDesc" rows="2">${esc(t.description || "")}</textarea></label>
-    <div class="field two"><label><span>Area</span><select id="mArea">${areaOpts}</select></label><label><span>Owner</span><select id="mOwner">${ownerOpts}</select></label></div>
-    <div class="field two"><label><span>Priority</span><select id="mPrio"><option value="normal">Med</option><option value="high" ${t.priority === "high" ? "selected" : ""}>High</option><option value="low" ${t.priority === "low" ? "selected" : ""}>Low</option></select></label><label><span>Due</span><input id="mDue" type="date" value="${esc(t.due_date || "")}"/></label></div>
+    <div class="field two"><label><span>Area</span><select id="mArea">${areaOpts}</select></label><label><span>Due</span><input id="mDue" type="date" value="${esc(t.due_date || "")}"/></label></div>
+    <label class="field"><span>Owner(s) <span style="color:var(--faint);font-weight:400">— pick any number</span></span>${ownerChecklist(assigneeIdsOf(t), "mowner")}</label>
+    <label class="field"><span>Priority</span><select id="mPrio"><option value="normal">Med</option><option value="high" ${t.priority === "high" ? "selected" : ""}>High</option><option value="low" ${t.priority === "low" ? "selected" : ""}>Low</option></select></label>
     <label class="field"><span>Tags <span style="color:var(--faint);font-weight:400">(comma-separated)</span></span><input id="mTags" value="${esc(t.tags || "")}" placeholder="e.g. vendor sourcing, diy"/></label>`,
     async () => {
-      const payload = { title: $("#mTitle").value.trim(), description: $("#mDesc").value.trim() || null, area_id: $("#mArea").value || null, assignee_id: $("#mOwner").value || null, priority: $("#mPrio").value, due_date: $("#mDue").value || null, tags: $("#mTags").value.trim() || null };
+      const payload = { title: $("#mTitle").value.trim(), description: $("#mDesc").value.trim() || null, area_id: $("#mArea").value || null, assignee_ids: checkedIds("mowner"), priority: $("#mPrio").value, due_date: $("#mDue").value || null, tags: $("#mTags").value.trim() || null };
       if (!payload.title) return toast("Add a title");
       if (id) await patch("/api/tasks/" + id, payload); else await post("/api/tasks", payload);
       await refresh(); render(); toast("Saved");
@@ -2014,12 +2051,12 @@ async function openIdeaDetail(id) {
 }
 function openPromoteModal(idea) {
   const areaOpts = state.data.areas.map((a) => `<option value="${a.id}" ${idea.area_id == a.id ? "selected" : ""}>${a.emoji || ""} ${esc(a.name)}</option>`).join("");
-  const ownerOpts = `<option value="">Unassigned</option>` + state.data.people.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
   modal(`<h3>🎯 Promote to task</h3><p class="hint">Creates a real task from "<b>${esc(idea.title)}</b>" and marks the idea Promoted.</p>
-    <div class="field two"><label><span>Area / phase</span><select id="prArea">${areaOpts}</select></label><label><span>Owner</span><select id="prOwner">${ownerOpts}</select></label></div>
-    <div class="field two"><label><span>Priority</span><select id="prPrio"><option value="normal">Med</option><option value="high">High</option><option value="low">Low</option></select></label><label><span>Due</span><input id="prDue" type="date"/></label></div>`,
+    <div class="field two"><label><span>Area / phase</span><select id="prArea">${areaOpts}</select></label><label><span>Priority</span><select id="prPrio"><option value="normal">Med</option><option value="high">High</option><option value="low">Low</option></select></label></div>
+    <label class="field"><span>Owner(s)</span>${ownerChecklist([], "prowner")}</label>
+    <label class="field"><span>Due</span><input id="prDue" type="date"/></label>`,
     async () => {
-      await post(`/api/ideas/${idea.id}/promote`, { area_id: $("#prArea").value || null, assignee_id: $("#prOwner").value || null, priority: $("#prPrio").value, due_date: $("#prDue").value || null });
+      await post(`/api/ideas/${idea.id}/promote`, { area_id: $("#prArea").value || null, assignee_ids: checkedIds("prowner"), priority: $("#prPrio").value, due_date: $("#prDue").value || null });
       await refresh(); await mountIdeas(); toast("Promoted → task created 🎯");
     });
 }
