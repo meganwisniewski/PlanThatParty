@@ -215,9 +215,11 @@ CREATE TABLE IF NOT EXISTS guests (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   name       TEXT NOT NULL,
   status     TEXT DEFAULT 'invited',   -- invited | coming | maybe | cant
-  plus_count INTEGER DEFAULT 0,        -- extra heads beyond this person
+  plus_count INTEGER DEFAULT 0,        -- extra heads beyond this person (possible +guests)
   contact    TEXT,
   notes      TEXT,
+  invited_by_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL, -- which host sent this invite
+  confirmed  INTEGER DEFAULT 0,        -- week-of confirmation flag
   created_at TEXT DEFAULT (datetime('now'))
 );
 

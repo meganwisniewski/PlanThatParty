@@ -1023,36 +1023,63 @@ const GS_COLOR = { coming: "#15803d", maybe: "#b45309", invited: "#5c6470", cant
 const guestHeads = (g) => 1 + (Number(g.plus_count) || 0);
 function guestsView() {
   const gs = state.data.guests || [];
+  const hosts = hostPeople();
+  const me = getHostId();
+  const gf = state.guestFilter || (state.guestFilter = { by: "", status: "" });
   const heads = (st) => gs.filter((g) => g.status === st).reduce((n, g) => n + guestHeads(g), 0);
+  const confirmedN = gs.filter((g) => g.confirmed).length;
   const inp = "border:1px solid var(--line-strong);border-radius:7px;padding:7px 9px;font:inherit;background:var(--surface)";
-  return `<div style="max-width:860px">
+  // host <select> options, marking one selected
+  const hostOpts = (sel) => `<option value="">— who invited —</option>` + hosts.map((p) => `<option value="${p.id}" ${String(sel || "") === String(p.id) ? "selected" : ""}>${esc(p.name)}</option>`).join("");
+  const shown = gs.filter((g) => {
+    if (gf.by === "me") { if (String(g.invited_by_person_id || "") !== String(me)) return false; }
+    else if (gf.by && String(g.invited_by_person_id || "") !== String(gf.by)) return false;
+    if (gf.status && g.status !== gf.status) return false;
+    return true;
+  });
+  const filtered = gf.by || gf.status;
+  return `<div style="max-width:960px">
     <div class="facts"><h2>🎟️ Guest list <span style="color:var(--faint);font-weight:400;font-size:13px">— private, just for planning</span></h2>
-      <div class="countdown" style="margin-bottom:14px">The party's open — people just show up — so this is only a place to jot who you're expecting. Nobody but hosts sees this.</div>
+      <div class="countdown" style="margin-bottom:14px">Invites go out personally, so this is where each host jots who they invited and the response. Mark who sent it, then yes / maybe / no, and confirm heads (incl. plus-ones) closer to the day. Nobody but hosts sees this.</div>
       <div style="display:flex;gap:22px;flex-wrap:wrap">
         <div><div style="font-size:26px;font-weight:800;color:${GS_COLOR.coming}">${heads("coming")}</div><div class="meta">coming (heads)</div></div>
-        <div><div style="font-size:26px;font-weight:800;color:${GS_COLOR.maybe}">${heads("maybe")}</div><div class="meta">maybe</div></div>
-        <div><div style="font-size:26px;font-weight:800;color:var(--muted)">${heads("invited")}</div><div class="meta">invited</div></div>
+        <div><div style="font-size:26px;font-weight:800;color:${GS_COLOR.maybe}">${heads("maybe")}</div><div class="meta">maybe (heads)</div></div>
+        <div><div style="font-size:26px;font-weight:800;color:var(--muted)">${heads("invited")}</div><div class="meta">awaiting reply</div></div>
+        <div><div style="font-size:26px;font-weight:800;color:${GS_COLOR.coming}">${confirmedN}</div><div class="meta">confirmed ✓</div></div>
         <div><div style="font-size:26px;font-weight:800">${gs.length}</div><div class="meta">on the list</div></div>
       </div>
     </div>
     <div class="facts" style="margin-top:14px">
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <input id="gName" placeholder="Add a name…" style="flex:1;min-width:180px;${inp}"/>
-        <input id="gPlus" type="number" min="0" placeholder="+guests" title="extra heads beyond this person" style="width:96px;${inp}"/>
+        <input id="gName" placeholder="Add a name…" style="flex:1;min-width:160px;${inp}"/>
+        <select id="gBy" style="${inp}">${hostOpts(me)}</select>
+        <input id="gPlus" type="number" min="0" placeholder="+guests" title="possible extra heads beyond this person" style="width:92px;${inp}"/>
         <button class="btn primary" data-add-guest>Add</button>
       </div>
+      <div style="font-size:11px;color:var(--faint);margin-top:6px">Adding a name that's already on the list will warn you — so shared friends don't get double-invited.</div>
+    </div>
+    <div class="facts" style="margin-top:14px;display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+      <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px">Invited by
+        <select data-gfilter-by style="${inp}"><option value="" ${!gf.by ? "selected" : ""}>Everyone</option><option value="me" ${gf.by === "me" ? "selected" : ""}>Just mine</option>${hosts.map((p) => `<option value="${p.id}" ${String(gf.by) === String(p.id) ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select>
+      </label>
+      <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px">Status
+        <select data-gfilter-status style="${inp}"><option value="" ${!gf.status ? "selected" : ""}>All</option>${GUEST_STATUS.map(([v, l]) => `<option value="${v}" ${gf.status === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+      </label>
+      ${filtered ? `<span class="chip">${shown.length} of ${gs.length} shown · ${shown.reduce((n, g) => n + (g.status === "coming" || g.status === "maybe" ? guestHeads(g) : 0), 0)} heads</span>` : ""}
     </div>
     <div class="facts" style="margin-top:14px">
-      ${gs.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:14px">
+      ${gs.length ? (shown.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:14px">
         <thead><tr style="text-align:left;color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.05em">
-          <th style="padding:6px 8px">Name</th><th style="padding:6px 8px">Status</th><th style="padding:6px 8px">+Guests</th><th style="padding:6px 8px">Notes</th><th></th></tr></thead>
-        <tbody>${gs.map((g) => `<tr style="border-top:1px solid var(--line)">
-          <td style="padding:6px 8px"><input data-gname="${g.id}" value="${esc(g.name)}" style="width:100%;min-width:120px;${inp}"/></td>
+          <th style="padding:6px 8px">Name</th><th style="padding:6px 8px">Response</th><th style="padding:6px 8px">Invited by</th><th style="padding:6px 8px">+Guests</th><th style="padding:6px 8px" title="Confirmed the week-of">✓</th><th style="padding:6px 8px">Notes</th><th></th></tr></thead>
+        <tbody>${shown.map((g) => `<tr style="border-top:1px solid var(--line)">
+          <td style="padding:6px 8px"><input data-gname="${g.id}" value="${esc(g.name)}" style="width:100%;min-width:130px;${inp}"/></td>
           <td style="padding:6px 8px"><select data-gstatus="${g.id}" style="${inp};color:${GS_COLOR[g.status] || ""}">${GUEST_STATUS.map(([v, l]) => `<option value="${v}" ${g.status === v ? "selected" : ""}>${l}</option>`).join("")}</select></td>
-          <td style="padding:6px 8px"><input type="number" min="0" data-gplus="${g.id}" value="${Number(g.plus_count) || 0}" style="width:70px;${inp}"/></td>
+          <td style="padding:6px 8px"><select data-gby="${g.id}" style="${inp};min-width:120px">${hostOpts(g.invited_by_person_id)}</select></td>
+          <td style="padding:6px 8px"><input type="number" min="0" data-gplus="${g.id}" value="${Number(g.plus_count) || 0}" style="width:68px;${inp}"/></td>
+          <td style="padding:6px 8px;text-align:center"><input type="checkbox" data-gconfirmed="${g.id}" ${g.confirmed ? "checked" : ""} title="Confirmed the week-of" style="width:18px;height:18px;cursor:pointer"/></td>
           <td style="padding:6px 8px"><input data-gnotes="${g.id}" value="${esc(g.notes || "")}" placeholder="—" style="width:100%;min-width:120px;${inp}"/></td>
           <td style="padding:6px 8px"><button class="btn small ghost danger" data-gdel="${g.id}" title="Remove">✕</button></td></tr>`).join("")}</tbody>
-      </table></div>` : `<div class="empty" style="padding:24px">No one on the list yet — add the first name above.</div>`}
+      </table></div>` : `<div class="empty" style="padding:24px">No guests match this filter.</div>`) : `<div class="empty" style="padding:24px">No one on the list yet — add the first name above.</div>`}
     </div>
   </div>`;
 }
@@ -1507,12 +1534,23 @@ function wireCanvas() {
   appEl.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = () => { const url = location.origin + "/me/" + b.dataset.copy; navigator.clipboard.writeText(url).then(() => toast("Link copied")).catch(() => prompt("Copy:", url)); }));
   appEl.querySelectorAll("[data-vcard]").forEach((b) => (b.onclick = () => downloadVCard(b.dataset.vcard)));
   // guests
-  const agb = $("[data-add-guest]"); if (agb) { const addG = async () => { const name = $("#gName").value.trim(); if (!name) return; const plus = $("#gPlus").value ? Number($("#gPlus").value) : 0; await post("/api/guests", { name, plus_count: plus }); await refresh(); render(); }; agb.onclick = addG; const gn = $("#gName"); if (gn) gn.onkeydown = (e) => { if (e.key === "Enter") addG(); }; }
+  const agb = $("[data-add-guest]"); if (agb) { const addG = async () => {
+    const name = $("#gName").value.trim(); if (!name) return;
+    const dup = (state.data.guests || []).find((x) => (x.name || "").trim().toLowerCase() === name.toLowerCase());
+    if (dup) { const by = dup.invited_by_name ? ` (invited by ${dup.invited_by_name})` : ""; if (!confirm(`"${name}" is already on the list${by}. Add again anyway?`)) return; }
+    const plus = $("#gPlus").value ? Number($("#gPlus").value) : 0;
+    const invited_by_person_id = ($("#gBy") && $("#gBy").value) || null;
+    await post("/api/guests", { name, plus_count: plus, invited_by_person_id }); await refresh(); render();
+  }; agb.onclick = addG; const gn = $("#gName"); if (gn) gn.onkeydown = (e) => { if (e.key === "Enter") addG(); }; }
   appEl.querySelectorAll("[data-gname]").forEach((i) => (i.onchange = async () => { await patch("/api/guests/" + i.dataset.gname, { name: i.value.trim() || "(unnamed)" }); }));
   appEl.querySelectorAll("[data-gnotes]").forEach((i) => (i.onchange = async () => { await patch("/api/guests/" + i.dataset.gnotes, { notes: i.value.trim() || null }); }));
   appEl.querySelectorAll("[data-gstatus]").forEach((s) => (s.onchange = async () => { await patch("/api/guests/" + s.dataset.gstatus, { status: s.value }); await refresh(); render(); }));
+  appEl.querySelectorAll("[data-gby]").forEach((s) => (s.onchange = async () => { await patch("/api/guests/" + s.dataset.gby, { invited_by_person_id: s.value || null }); await refresh(); render(); }));
+  appEl.querySelectorAll("[data-gconfirmed]").forEach((c) => (c.onchange = async () => { await patch("/api/guests/" + c.dataset.gconfirmed, { confirmed: c.checked ? 1 : 0 }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-gplus]").forEach((i) => (i.onchange = async () => { await patch("/api/guests/" + i.dataset.gplus, { plus_count: i.value ? Number(i.value) : 0 }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-gdel]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this guest?")) return; await del("/api/guests/" + b.dataset.gdel); await refresh(); render(); }));
+  const gfb = $("[data-gfilter-by]"); if (gfb) gfb.onchange = () => { (state.guestFilter = state.guestFilter || { by: "", status: "" }).by = gfb.value; render(); };
+  const gfs = $("[data-gfilter-status]"); if (gfs) gfs.onchange = () => { (state.guestFilter = state.guestFilter || { by: "", status: "" }).status = gfs.value; render(); };
   // events
   const aev = $("[data-add-event]"); if (aev) aev.onclick = () => openEventModal();
   const sev = $("[data-seed-events]"); if (sev) sev.onclick = seedStarterEvents;

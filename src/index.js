@@ -530,7 +530,7 @@ async function api(request, env, path) {
         .all(),
       env.DB.prepare("SELECT COUNT(*) AS n FROM feedback WHERE status = 'new'").first(),
       env.DB.prepare("SELECT COUNT(*) AS n FROM ideas WHERE stage = 'submitted'").first(),
-      env.DB.prepare("SELECT * FROM guests ORDER BY created_at DESC").all(),
+      env.DB.prepare("SELECT g.*, p.name AS invited_by_name FROM guests g LEFT JOIN people p ON p.id = g.invited_by_person_id ORDER BY g.created_at DESC").all(),
       env.DB.prepare("SELECT * FROM checklist ORDER BY sort_order, id").all(),
       env.DB.prepare("SELECT * FROM zones ORDER BY sort_order, id").all(),
       env.DB.prepare("SELECT * FROM events ORDER BY (event_date IS NULL), event_date, start_time, sort_order, id").all(),
@@ -685,21 +685,22 @@ async function api(request, env, path) {
     if (method === "GET") {
       const gate = await requireAdmin(request, env);
       if (gate) return gate;
-      const rows = (await env.DB.prepare("SELECT * FROM guests ORDER BY created_at DESC").all()).results;
+      const rows = (await env.DB.prepare("SELECT g.*, p.name AS invited_by_name FROM guests g LEFT JOIN people p ON p.id = g.invited_by_person_id ORDER BY g.created_at DESC").all()).results;
       return json(rows);
     }
     if (method === "POST") {
       const b = await body(request);
       if (!b.name || !b.name.trim()) return err("Name required.");
       const r = await env.DB.prepare(
-        "INSERT INTO guests (name, status, plus_count, contact, notes) VALUES (?,?,?,?,?)"
-      ).bind(b.name.trim(), b.status || "invited", b.plus_count ? Number(b.plus_count) : 0, b.contact || null, b.notes || null).run();
+        "INSERT INTO guests (name, status, plus_count, contact, notes, invited_by_person_id, confirmed) VALUES (?,?,?,?,?,?,?)"
+      ).bind(b.name.trim(), b.status || "invited", b.plus_count ? Number(b.plus_count) : 0, b.contact || null, b.notes || null, b.invited_by_person_id || null, b.confirmed ? 1 : 0).run();
       return json({ id: r.meta.last_row_id }, 201);
     }
     if (method === "PATCH" && id) {
       const b = await body(request);
       if ("plus_count" in b) b.plus_count = b.plus_count ? Number(b.plus_count) : 0;
-      await updateRow(env, "guests", id, pick(b, ["name", "status", "plus_count", "contact", "notes"]));
+      if ("confirmed" in b) b.confirmed = b.confirmed ? 1 : 0;
+      await updateRow(env, "guests", id, pick(b, ["name", "status", "plus_count", "contact", "notes", "invited_by_person_id", "confirmed"]));
       return json({ ok: true });
     }
     if (method === "DELETE" && id) {
