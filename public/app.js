@@ -287,6 +287,7 @@ function matchesFilter(t) {
   // Owner filter combines (AND) with area/saved/tag: "only mine" resolves to
   // whoever is set in "I'm posting as"; a specific id filters to that person.
   if (f.assignee) { const who = f.assignee === "me" ? getHostId() : f.assignee; if (who && !assigneeIdsOf(t).includes(Number(who))) return false; }
+  if (f.status && t.status !== f.status) return false;
   if (f.tag) return taskTags(t).includes(f.tag);
   if (f.areaId) return t.area_id == f.areaId;
   if (f.saved === "unassigned") return !assigneeIdsOf(t).length && t.status !== "done";
@@ -500,7 +501,7 @@ function sidebar() {
 
 function topbar(party, cd) {
   const showWork = state.screen === "work";
-  let scope = state.filter.areaId ? (areaById(state.filter.areaId) || {}).name : state.filter.saved ? { unassigned: "Needs owner", blocked: "Blocked", week: "Due this week" }[state.filter.saved] : "All areas";
+  let scope = state.filter.areaId ? (areaById(state.filter.areaId) || {}).name : state.filter.saved ? { unassigned: "Needs owner", blocked: "Blocked", week: "Due this week" }[state.filter.saved] : state.filter.status ? (ST_LABEL[state.filter.status] || state.filter.status) : "All areas";
   if (state.filter.assignee) { const who = state.filter.assignee === "me" ? getHostId() : state.filter.assignee; const pn = who ? (personById(who) || {}).name : null; scope += ` · ${state.filter.assignee === "me" ? "mine" : (pn ? pn + "’s" : "assigned")}`; }
   const ownerFilter = () => {
     const cur = state.filter.assignee || "";
@@ -570,7 +571,7 @@ function gridView() {
   let n = 0;
   const groups = areas.map((a) => {
     const rows = areaOrderedRows(a.id);
-    if (!rows.length && (state.filter.saved || state.filter.q || state.filter.tag || state.filter.assignee)) return "";
+    if (!rows.length && (state.filter.saved || state.filter.q || state.filter.tag || state.filter.assignee || state.filter.status)) return "";
     const done = rows.filter((r) => r.t.status === "done").length;
     const pct = rows.length ? Math.round((done / rows.length) * 100) : 0;
     const shown = state.showDone ? rows : rows.filter((r) => r.t.status !== "done");
@@ -582,7 +583,8 @@ function gridView() {
       : `<tr><td colspan="7"><div class="empty"><div>No tasks in ${esc(a.name)} yet.</div><button class="btn small" data-add-task data-area="${a.id}">+ Add one</button></div></td></tr>`);
     return `<tr class="grouphdr"><td colspan="7"><button class="gh" data-collapse="${a.id}"><span class="tri">${collapsed ? "▶" : "▼"}</span><span style="width:10px;height:10px;border-radius:3px;background:${areaColor(a)};display:inline-block"></span> ${a.emoji || ""} ${esc(a.name).toUpperCase()} <span class="gcount">${rows.length}</span><span class="growbar"><span class="mini-track"><div style="width:${pct}%"></div></span> <span class="gcount">${pct}%</span></span></button></td></tr>${body}`;
   }).join("");
-  const tagBanner = state.filter.tag ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px"><span class="chip">🏷️ ${esc(state.filter.tag)}</span><span class="meta">Filtered to this tag</span><button class="btn small ghost" data-saved-clear>Clear</button></div>` : "";
+  const tagBanner = state.filter.tag ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px"><span class="chip">🏷️ ${esc(state.filter.tag)}</span><span class="meta">Filtered to this tag</span><button class="btn small ghost" data-saved-clear>Clear</button></div>`
+    : state.filter.status ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px"><span class="chip" style="color:${ST_COLOR[state.filter.status] || ""}">${ST_GLYPH[state.filter.status] || ""} ${esc(ST_LABEL[state.filter.status] || state.filter.status)}</span><span class="meta">Filtered by status</span><button class="btn small ghost" data-saved-clear>Clear</button></div>` : "";
   if (!groups.trim()) return `<div class="grid-wrap">${tagBanner}<div class="empty"><div class="big">Nothing matches this filter.</div><button class="btn" data-saved-clear>Show all tasks</button></div></div>`;
   return `<div class="grid-wrap">${tagBanner}<table class="gt">
     <thead><tr><th class="c-num">#</th><th>Task</th><th class="c-owner">Owner</th><th class="c-status">Status</th><th class="c-prio">Prio</th><th class="c-due">Due</th><th class="c-pct">%</th></tr></thead>
@@ -855,17 +857,17 @@ function overview() {
       <div class="factgrid">${facts.map(([k, v, lf]) => `<div class="fact" ${lf ? `data-open-fact="${lf}" style="cursor:pointer"` : ""}><div class="fk">${k}</div><div class="fv ${v == null ? "unset" : ""}">${v == null ? "Set it →" : esc(v)}</div></div>`).join("")}</div>
     </div>
     <div class="tiles">
-      <div class="tile ${pct === 100 ? "good" : ""}"><div class="num">${pct}%</div><div class="lbl">${done}/${tasks.length} tasks done</div></div>
-      <div class="tile ${unassigned ? "warn" : "good"}"><div class="num">${unassigned}</div><div class="lbl">need an owner</div></div>
-      <div class="tile ${blocked ? "bad" : ""}"><div class="num">${blocked}</div><div class="lbl">blocked</div></div>
+      <div class="tile ${pct === 100 ? "good" : ""} clicky" data-tilefilter="done" title="See the done tasks"><div class="num">${pct}%</div><div class="lbl">${done}/${tasks.length} tasks done</div></div>
+      <div class="tile ${unassigned ? "warn" : "good"} clicky" data-tilefilter="unassigned" title="See tasks needing an owner"><div class="num">${unassigned}</div><div class="lbl">need an owner</div></div>
+      <div class="tile ${blocked ? "bad" : ""} clicky" data-tilefilter="blocked" title="See blocked tasks"><div class="num">${blocked}</div><div class="lbl">blocked</div></div>
       <div class="tile"><div class="num">${cd ? (cd.days >= 0 ? cd.days : "—") : "—"}</div><div class="lbl">days to go</div></div>
     </div>
     <div class="twocol">
       <div class="donut-wrap"><div class="donut" style="background:${donut}"><div class="donut-center"><div class="p">${pct}%</div><div class="s">done</div></div></div>
-        <div class="legend">${STATUSES.map((s, i) => counts[i] ? `<div><span style="background:${ST_COLOR[s]}"></span>${ST_LABEL[s]} · ${counts[i]}</div>` : "").join("")}</div>
+        <div class="legend">${STATUSES.map((s, i) => counts[i] ? `<button type="button" class="legend-item" data-legend-status="${s}" title="See ${ST_LABEL[s]} tasks"><span style="background:${ST_COLOR[s]}"></span>${ST_LABEL[s]} · ${counts[i]}</button>` : "").join("")}</div>
       </div>
       <div class="areabars"><h2>Progress by area</h2>
-        ${d.areas.map((a) => { const at = tasks.filter((t) => t.area_id === a.id); const ad = at.filter((t) => t.status === "done").length; const p = at.length ? Math.round((ad / at.length) * 100) : 0; return `<div class="arow"><div class="an">${a.emoji || ""} ${esc(a.name)}</div><div class="at"><div style="width:${p}%"></div></div><div class="ap">${ad}/${at.length}</div></div>`; }).join("")}
+        ${d.areas.map((a) => { const at = tasks.filter((t) => t.area_id === a.id); const ad = at.filter((t) => t.status === "done").length; const p = at.length ? Math.round((ad / at.length) * 100) : 0; return `<button type="button" class="arow arow-btn" data-area="${a.id}" title="See ${esc(a.name)} tasks"><div class="an">${a.emoji || ""} ${esc(a.name)}</div><div class="at"><div style="width:${p}%"></div></div><div class="ap">${ad}/${at.length}</div></button>`; }).join("")}
       </div>
     </div>
     ${party.event_date ? `<div class="facts"><h2>📅 Share the party calendar</h2>
@@ -1288,6 +1290,7 @@ function eventsView() {
         ${e.notes ? `<div class="evnotes">${esc(e.notes)}</div>` : ""}
         <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
           <button class="btn small ghost" data-edit-event="${e.id}">Edit</button>
+          <button class="btn small ghost" data-event-task="${e.id}" title="Make a trackable task with comments &amp; reminders">＋ Turn into task</button>
           ${gcal ? `<a class="btn small ghost" href="${gcal}" target="_blank" rel="noopener">📅 Add to calendar</a>` : ""}
           <button class="btn small ghost danger" data-del-event="${e.id}">Remove</button>
         </div>
@@ -1423,16 +1426,27 @@ function collectSupplyTags() {
 // Spin a supply/inventory item into a to-do, carrying over its name, zone and
 // tags and linking back so it's clear where it came from.
 async function promoteToTask(kind, row) {
-  const label = kind === "inventory" ? "Set up / bring" : "Source";
-  const title = `${label}: ${row.item}`;
-  const bits = [];
-  if (row.quantity) bits.push(`Need: ${row.quantity}`);
-  if (row.qty_have) bits.push(`Have: ${row.qty_have}`);
-  if (row.link) bits.push(row.link);
-  bits.push(`(from ${kind === "inventory" ? "Inventory" : "Sourcing"})`);
-  const payload = { title, description: bits.join("\n"), area_id: row.area_id || null };
-  if (row.tags) payload.tags = row.tags;
-  await post("/api/tasks", payload);
+  const bits = []; const extra = {}; let title;
+  if (kind === "event") {
+    // An event becomes a trackable task: carries its date + hosts, and unlocks
+    // comments, reminders and status so you can chase it down.
+    title = row.title;
+    if (row.event_date) extra.due_date = row.event_date;
+    const ids = assigneeIdsOf(row); if (ids.length) extra.assignee_ids = ids;
+    if (row.location) bits.push(`📍 ${row.location}`);
+    if (row.notes) bits.push(row.notes);
+    bits.push("(from the Events page)");
+  } else {
+    const label = kind === "inventory" ? "Set up / bring" : "Source";
+    title = `${label}: ${row.item}`;
+    if (row.quantity) bits.push(`Need: ${row.quantity}`);
+    if (row.qty_have) bits.push(`Have: ${row.qty_have}`);
+    if (row.link) bits.push(row.link);
+    bits.push(`(from ${kind === "inventory" ? "Inventory" : "Sourcing"})`);
+    if (row.area_id) extra.area_id = row.area_id;
+    if (row.tags) extra.tags = row.tags;
+  }
+  await post("/api/tasks", Object.assign({ title, description: bits.join("\n") }, extra));
   await refresh(); render();
   toast("Added to tasks ✓");
 }
@@ -1810,6 +1824,9 @@ function wire() {
   // nav
   appEl.querySelectorAll("[data-area]").forEach((b) => (b.onclick = () => { state.screen = "work"; state.dial = 1; state.filter = { areaId: Number(b.dataset.area), saved: null, q: state.filter.q, assignee: state.filter.assignee }; state.navOpen = false; render(); }));
   appEl.querySelectorAll("[data-saved]").forEach((b) => (b.onclick = () => { state.screen = "work"; state.dial = 1; state.filter = { areaId: null, saved: b.dataset.saved || null, q: state.filter.q, assignee: state.filter.assignee }; state.navOpen = false; render(); }));
+  // Overview donut legend + tiles → jump into the work list, filtered.
+  appEl.querySelectorAll("[data-legend-status]").forEach((b) => (b.onclick = () => { const s = b.dataset.legendStatus; state.screen = "work"; state.dial = 1; state.view = "grid"; if (s === "done") state.showDone = true; state.filter = { areaId: null, saved: null, tag: null, status: s, q: "", assignee: state.filter.assignee }; state.navOpen = false; render(); }));
+  appEl.querySelectorAll("[data-tilefilter]").forEach((b) => (b.onclick = () => { const f = b.dataset.tilefilter; state.screen = "work"; state.dial = 1; state.view = "grid"; if (f === "done") state.showDone = true; state.filter = { areaId: null, saved: f === "unassigned" ? "unassigned" : null, tag: null, status: f === "unassigned" ? null : f, q: "", assignee: state.filter.assignee }; state.navOpen = false; render(); }));
   const ov = $("[data-overview]"); if (ov) ov.onclick = () => { state.screen = "work"; state.dial = 0; state.filter = { areaId: null, saved: null, q: "" }; state.navOpen = false; render(); };
   appEl.querySelectorAll("[data-screen]").forEach((b) => (b.onclick = () => { state.screen = b.dataset.screen; state.navOpen = false; render(); }));
   const lo = $("[data-logout]"); if (lo) lo.onclick = () => { clearPin(); state.data = null; state.navOpen = false; renderGuest(); };
@@ -1889,6 +1906,7 @@ function wireCanvas() {
   const aev = $("[data-add-event]"); if (aev) aev.onclick = () => openEventModal();
   const sev = $("[data-seed-events]"); if (sev) sev.onclick = seedStarterEvents;
   appEl.querySelectorAll("[data-edit-event]").forEach((b) => (b.onclick = () => openEventModal(Number(b.dataset.editEvent))));
+  appEl.querySelectorAll("[data-event-task]").forEach((b) => (b.onclick = () => { const e = (state.data.events || []).find((x) => x.id == b.dataset.eventTask); if (e) promoteToTask("event", e); }));
   appEl.querySelectorAll("[data-del-event]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this event?")) return; await del("/api/events/" + b.dataset.delEvent); await refresh(); render(); }));
   // sourcing
   const asup = $("[data-add-supply]"); if (asup) { const addS = async () => { const item = $("#soItem").value.trim(); if (!item) return; const quantity = $("#soQty").value.trim() || null; const estimated_cost = $("#soCost").value ? Number($("#soCost").value) : null; await post("/api/supplies", { item, quantity, estimated_cost }); await refresh(); render(); }; asup.onclick = addS; const si = $("#soItem"); if (si) si.onkeydown = (e) => { if (e.key === "Enter") addS(); }; }

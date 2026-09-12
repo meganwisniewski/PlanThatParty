@@ -225,8 +225,14 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1; }
 .donut-center .p { font-size: 26px; font-weight: 800; }
 .donut-center .s { font-size: 11px; color: var(--muted); }
-.legend { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; font-size: 12px; text-align: left; }
+.legend { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font-size: 12px; text-align: left; }
 .legend span { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; }
+.legend-item { display: flex; align-items: center; width: 100%; text-align: left; background: none; border: none; padding: 4px 6px; margin: 0 -6px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 12px; color: var(--ink); }
+.legend-item:hover { background: var(--surface-2); }
+.tile.clicky { cursor: pointer; }
+.tile.clicky:hover { border-color: var(--line-strong); box-shadow: var(--shadow-panel); }
+.arow-btn { display: flex; width: 100%; background: none; border: none; cursor: pointer; font: inherit; text-align: left; border-radius: 8px; }
+.arow-btn:hover { background: var(--surface-2); }
 .areabars { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; box-shadow: var(--shadow-card); }
 .areabars h2 { margin: 0 0 12px; font-size: 15px; }
 .arow { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
