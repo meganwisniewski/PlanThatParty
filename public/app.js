@@ -1467,7 +1467,8 @@ function messagesView() {
 
 function peopleView() {
   const d = state.data;
-  return `<div style="display:flex;align-items:center;margin-bottom:14px"><div><h1 style="margin:0;font-size:18px">The crew</h1><div class="countdown">Each person gets a private link showing only their tasks, on their channel.</div></div><div class="grow"></div><button class="btn primary" data-add-person>+ Add person</button></div>
+  const withContact = d.people.filter((p) => p.phone || p.email).length;
+  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap"><div><h1 style="margin:0;font-size:18px">The crew</h1><div class="countdown">Each person gets a private link showing only their tasks, on their channel.</div></div><div class="grow"></div>${withContact ? `<button class="btn" data-vcard-all title="Download one file with everyone — open it to add the whole crew to your Contacts at once">👥 Add all to Contacts</button>` : ""}<button class="btn primary" data-add-person>+ Add person</button></div>
   <div class="cards">${d.people.length ? d.people.map(personCard).join("") : `<div class="empty">No one yet — add your co-hosts and volunteers.</div>`}</div>`;
 }
 function personCard(p) {
@@ -1478,7 +1479,7 @@ function personCard(p) {
     <div style="font-size:13px;color:var(--muted)">${p.email ? `📧 ${esc(p.email)}<br>` : ""}${p.phone ? `📱 ${esc(p.phone)}<br>` : ""}${p.channel_notes ? `📝 ${esc(p.channel_notes)}` : ""}</div>
     ${p.notes ? `<div class="pnote">${esc(p.notes)}</div>` : ""}
     <div style="margin-top:10px"><span class="chip">${n} task${n === 1 ? "" : "s"}</span></div>
-    <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap"><button class="btn small" data-person-intake="${p.id}">🎤 Intake${personHasIntake(p) ? ` <span class="chip" style="background:#e8f7ee;color:#1a7f42;padding:0 6px">✓</span>` : ""}</button><button class="btn ghost small" data-copy="${esc(p.share_token)}">🔗 Copy link</button><button class="btn ghost small" data-vcard="${p.id}" title="Save to your phone's contacts (iPhone & Android)">👤 Add to contacts</button><button class="btn ghost small danger" data-del-person="${p.id}">Remove</button></div>
+    <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap"><button class="btn small" data-person-intake="${p.id}">🎤 Intake${personHasIntake(p) ? ` <span class="chip" style="background:#e8f7ee;color:#1a7f42;padding:0 6px">✓</span>` : ""}</button><button class="btn ghost small" data-copy="${esc(p.share_token)}">🔗 Copy link</button><button class="btn ghost small" data-vcard="${p.id}" title="Download a contact card — open it to add to Contacts (Mac, iPhone & Android)">👤 Add to contacts</button><button class="btn ghost small danger" data-del-person="${p.id}">Remove</button></div>
   </div>`;
 }
 
@@ -1512,6 +1513,19 @@ function downloadVCard(id) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   toast("Opening contact card…");
+}
+// One .vcf with the whole crew — open it once to import everyone into Contacts.
+function downloadAllVCards() {
+  const people = (state.data.people || []).filter((p) => p.phone || p.email);
+  if (!people.length) return toast("No phone/email on file yet");
+  const blob = new Blob([people.map(personVCard).join("\r\n")], { type: "text/vcard;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${((state.data.party && state.data.party.name) || "crew").replace(/[^a-z0-9]+/gi, "-")}-crew.vcf`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast(`${people.length} contacts — open the file to add them all`);
 }
 
 /* ---------------- SETTINGS ---------------- */
@@ -1617,6 +1631,7 @@ function wireCanvas() {
   appEl.querySelectorAll("[data-del-person]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this person?")) return; await del("/api/people/" + b.dataset.delPerson); await refresh(); render(); }));
   appEl.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = () => { const url = location.origin + "/me/" + b.dataset.copy; navigator.clipboard.writeText(url).then(() => toast("Link copied")).catch(() => prompt("Copy:", url)); }));
   appEl.querySelectorAll("[data-vcard]").forEach((b) => (b.onclick = () => downloadVCard(b.dataset.vcard)));
+  const vAll = $("[data-vcard-all]"); if (vAll) vAll.onclick = downloadAllVCards;
   // guests
   const agb = $("[data-add-guest]"); if (agb) { const addG = async () => {
     const name = $("#gName").value.trim(); if (!name) return;
