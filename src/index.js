@@ -866,6 +866,16 @@ async function api(request, env, path) {
     }
     if (method === "DELETE" && id) {
       await env.DB.prepare("DELETE FROM people WHERE id = ?").bind(id).run();
+      // The FK ON DELETE SET NULL clears the legacy assignee_id, but the id can
+      // still linger in the multi-assignee CSV — scrub it so orphaned items
+      // correctly show as "needs owner" again.
+      for (const tbl of ["tasks", "supplies", "events"]) {
+        const rows = (await env.DB.prepare(`SELECT id, assignee_ids FROM ${tbl} WHERE ${memberSQL()}`).bind(String(id)).all()).results;
+        for (const row of rows) {
+          const ids = String(row.assignee_ids || "").split(",").map((x) => parseInt(x, 10)).filter((x) => Number.isInteger(x) && x > 0 && x !== Number(id));
+          await env.DB.prepare(`UPDATE ${tbl} SET assignee_ids = ?, assignee_id = ? WHERE id = ?`).bind(ids.length ? ids.join(",") : null, ids.length ? ids[0] : null, row.id).run();
+        }
+      }
       return json({ ok: true });
     }
   }
