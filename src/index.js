@@ -203,6 +203,19 @@ async function addMentions(env, ids, kind, refId, actorName, text) {
 
 // ---- API routing ---------------------------------------------------------
 
+// Parse a pasted / Notes-app guest list: one guest per line, name first,
+// optional phone and/or email anywhere on the line. Tolerates bullets & numbering.
+function parseGuestLines(text) {
+  return String(text || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((raw) => {
+    let line = raw.replace(/^\s*[-*•]\s*/, "").replace(/^\s*\d+[.)]\s*/, "");
+    let email = null, phone = null;
+    const em = line.match(/[\w.+-]+@[\w-]+\.[\w.-]+/); if (em) { email = em[0]; line = line.replace(em[0], " "); }
+    const ph = line.match(/\+?\(?\d[\d\s().-]{6,}\d/); if (ph) { phone = ph[0].trim(); line = line.replace(ph[0], " "); }
+    const name = line.split(/[,\t|]/)[0].replace(/\s+/g, " ").trim();
+    return { name, phone: phone || null, email: email || null };
+  }).filter((g) => g.name);
+}
+
 async function api(request, env, path) {
   const method = request.method;
   const seg = path.split("/").filter(Boolean); // e.g. ["api","people","3"]
@@ -682,6 +695,59 @@ async function api(request, env, path) {
 
   // ---------- guests (private, host-only) ----------
   if (resource === "guests") {
+    // Bulk export as plain text (name, phone, email) — for copy-out & the Shortcut pull.
+    if (id === "export" && method === "GET") {
+      const gate = await requireAdmin(request, env);
+      if (gate) return gate;
+      const rows = (await env.DB.prepare("SELECT name, phone, email FROM guests ORDER BY lower(name)").all()).results;
+      const text = rows.map((r) => [r.name, r.phone, r.email].filter(Boolean).join(", ")).join("\n");
+      return new Response(text, { headers: { "content-type": "text/plain; charset=utf-8" } });
+    }
+    // Bulk import: accepts JSON {guests:[{name,phone,email}], invited_by_person_id|invited_by_name|by}
+    // OR a raw text list (Notes / paste). Upserts by name — never duplicates, only fills gaps.
+    if (id === "import" && method === "POST") {
+      const gate = await requireAdmin(request, env);
+      if (gate) return gate;
+      const raw = await request.text();
+      const url = new URL(request.url);
+      let items = [], byField = url.searchParams.get("by"), status = "invited";
+      try {
+        const j = JSON.parse(raw);
+        if (Array.isArray(j)) items = j;
+        else if (j && Array.isArray(j.guests)) items = j.guests;
+        else if (j && typeof j.text === "string") items = parseGuestLines(j.text);
+        else items = parseGuestLines(raw);
+        if (j && !Array.isArray(j)) { byField = j.invited_by_person_id || j.invited_by_name || j.by || byField; if (j.status) status = j.status; }
+      } catch { items = parseGuestLines(raw); }
+      // resolve "who invited" to a person id (accepts an id or a name)
+      let byId = null;
+      if (byField != null && String(byField).trim() !== "") {
+        if (/^\d+$/.test(String(byField))) byId = Number(byField);
+        else { const pr = await env.DB.prepare("SELECT id FROM people WHERE lower(name)=lower(?) LIMIT 1").bind(String(byField).trim()).first(); byId = pr ? pr.id : null; }
+      }
+      const existing = (await env.DB.prepare("SELECT id, lower(trim(name)) AS k, phone, email, invited_by_person_id FROM guests").all()).results;
+      const byName = new Map(existing.map((r) => [r.k, r]));
+      let added = 0, updated = 0;
+      for (const it of items) {
+        const name = (it.name || "").trim(); if (!name) continue;
+        const key = name.toLowerCase();
+        const phone = it.phone ? String(it.phone).trim() : null;
+        const email = it.email ? String(it.email).trim() : null;
+        const ex = byName.get(key);
+        if (ex) {
+          const sets = [], binds = [];
+          if (phone && !ex.phone) { sets.push("phone=?"); binds.push(phone); }
+          if (email && !ex.email) { sets.push("email=?"); binds.push(email); }
+          if (byId && !ex.invited_by_person_id) { sets.push("invited_by_person_id=?"); binds.push(byId); }
+          if (sets.length) { binds.push(ex.id); await env.DB.prepare(`UPDATE guests SET ${sets.join(",")} WHERE id=?`).bind(...binds).run(); updated++; }
+        } else {
+          await env.DB.prepare("INSERT INTO guests (name, status, plus_count, phone, email, invited_by_person_id) VALUES (?,?,?,?,?,?)").bind(name, status, 0, phone, email, byId).run();
+          byName.set(key, { id: -1, k: key, phone, email, invited_by_person_id: byId });
+          added++;
+        }
+      }
+      return json({ added, updated, total: items.length });
+    }
     if (method === "GET") {
       const gate = await requireAdmin(request, env);
       if (gate) return gate;
@@ -692,15 +758,15 @@ async function api(request, env, path) {
       const b = await body(request);
       if (!b.name || !b.name.trim()) return err("Name required.");
       const r = await env.DB.prepare(
-        "INSERT INTO guests (name, status, plus_count, contact, notes, invited_by_person_id, confirmed) VALUES (?,?,?,?,?,?,?)"
-      ).bind(b.name.trim(), b.status || "invited", b.plus_count ? Number(b.plus_count) : 0, b.contact || null, b.notes || null, b.invited_by_person_id || null, b.confirmed ? 1 : 0).run();
+        "INSERT INTO guests (name, status, plus_count, contact, phone, email, notes, invited_by_person_id, confirmed) VALUES (?,?,?,?,?,?,?,?,?)"
+      ).bind(b.name.trim(), b.status || "invited", b.plus_count ? Number(b.plus_count) : 0, b.contact || null, b.phone || null, b.email || null, b.notes || null, b.invited_by_person_id || null, b.confirmed ? 1 : 0).run();
       return json({ id: r.meta.last_row_id }, 201);
     }
     if (method === "PATCH" && id) {
       const b = await body(request);
       if ("plus_count" in b) b.plus_count = b.plus_count ? Number(b.plus_count) : 0;
       if ("confirmed" in b) b.confirmed = b.confirmed ? 1 : 0;
-      await updateRow(env, "guests", id, pick(b, ["name", "status", "plus_count", "contact", "notes", "invited_by_person_id", "confirmed"]));
+      await updateRow(env, "guests", id, pick(b, ["name", "status", "plus_count", "contact", "phone", "email", "notes", "invited_by_person_id", "confirmed"]));
       return json({ ok: true });
     }
     if (method === "DELETE" && id) {

@@ -217,6 +217,8 @@ CREATE TABLE IF NOT EXISTS guests (
   status     TEXT DEFAULT 'invited',   -- invited | coming | maybe | cant
   plus_count INTEGER DEFAULT 0,        -- extra heads beyond this person (possible +guests)
   contact    TEXT,
+  phone      TEXT,                      -- optional
+  email      TEXT,                      -- optional
   notes      TEXT,
   invited_by_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL, -- which host sent this invite
   confirmed  INTEGER DEFAULT 0,        -- week-of confirmation flag

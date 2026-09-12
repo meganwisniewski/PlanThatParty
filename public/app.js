@@ -1051,12 +1051,24 @@ function guestsView() {
     </div>
     <div class="facts" style="margin-top:14px">
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <input id="gName" placeholder="Add a name…" style="flex:1;min-width:160px;${inp}"/>
+        <input id="gName" placeholder="Add a name…" style="flex:2;min-width:150px;${inp}"/>
         <select id="gBy" style="${inp}">${hostOpts(me)}</select>
-        <input id="gPlus" type="number" min="0" placeholder="+guests" title="possible extra heads beyond this person" style="width:92px;${inp}"/>
+        <input id="gPhone" placeholder="phone (optional)" style="flex:1;min-width:120px;${inp}"/>
+        <input id="gEmail" placeholder="email (optional)" style="flex:1;min-width:140px;${inp}"/>
+        <input id="gPlus" type="number" min="0" placeholder="+guests" title="possible extra heads beyond this person" style="width:90px;${inp}"/>
         <button class="btn primary" data-add-guest>Add</button>
       </div>
-      <div style="font-size:11px;color:var(--faint);margin-top:6px">Adding a name that's already on the list will warn you — so shared friends don't get double-invited.</div>
+      <div style="font-size:11px;color:var(--faint);margin-top:6px">Only the name is required. Adding a name that's already on the list will warn you — so shared friends don't get double-invited.</div>
+    </div>
+    <div class="facts" style="margin-top:14px">
+      <details><summary style="cursor:pointer;font-weight:600">📋 Import / export a list <span style="font-weight:400;color:var(--faint);font-size:12px">— paste from Notes, or sync with the Shortcut</span></summary>
+        <div class="countdown" style="margin:10px 0">Paste a list below — one guest per line, name first, phone/email optional (e.g. <code>Jane Doe, 555-123-4567, jane@email.com</code>). New names are added under you; names already on the list just get any missing phone/email filled in — never duplicated.</div>
+        <textarea id="gPaste" rows="4" placeholder="Jane Doe, 555-123-4567, jane@email.com&#10;Sam Lee&#10;Priya Patel, priya@email.com" style="width:100%;${inp};resize:vertical"></textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <button class="btn primary" data-guest-import>Import pasted list</button>
+          <button class="btn" data-guest-copy>📋 Copy full list</button>
+        </div>
+      </details>
     </div>
     <div class="facts" style="margin-top:14px;display:flex;gap:14px;flex-wrap:wrap;align-items:center">
       <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px">Invited by
@@ -1070,13 +1082,15 @@ function guestsView() {
     <div class="facts" style="margin-top:14px">
       ${gs.length ? (shown.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:14px">
         <thead><tr style="text-align:left;color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.05em">
-          <th style="padding:6px 8px">Name</th><th style="padding:6px 8px">Response</th><th style="padding:6px 8px">Invited by</th><th style="padding:6px 8px">+Guests</th><th style="padding:6px 8px" title="Confirmed the week-of">✓</th><th style="padding:6px 8px">Notes</th><th></th></tr></thead>
+          <th style="padding:6px 8px">Name</th><th style="padding:6px 8px">Response</th><th style="padding:6px 8px">Invited by</th><th style="padding:6px 8px">+Guests</th><th style="padding:6px 8px" title="Confirmed the week-of">✓</th><th style="padding:6px 8px">Phone</th><th style="padding:6px 8px">Email</th><th style="padding:6px 8px">Notes</th><th></th></tr></thead>
         <tbody>${shown.map((g) => `<tr style="border-top:1px solid var(--line)">
           <td style="padding:6px 8px"><input data-gname="${g.id}" value="${esc(g.name)}" style="width:100%;min-width:130px;${inp}"/></td>
           <td style="padding:6px 8px"><select data-gstatus="${g.id}" style="${inp};color:${GS_COLOR[g.status] || ""}">${GUEST_STATUS.map(([v, l]) => `<option value="${v}" ${g.status === v ? "selected" : ""}>${l}</option>`).join("")}</select></td>
           <td style="padding:6px 8px"><select data-gby="${g.id}" style="${inp};min-width:120px">${hostOpts(g.invited_by_person_id)}</select></td>
           <td style="padding:6px 8px"><input type="number" min="0" data-gplus="${g.id}" value="${Number(g.plus_count) || 0}" style="width:68px;${inp}"/></td>
           <td style="padding:6px 8px;text-align:center"><input type="checkbox" data-gconfirmed="${g.id}" ${g.confirmed ? "checked" : ""} title="Confirmed the week-of" style="width:18px;height:18px;cursor:pointer"/></td>
+          <td style="padding:6px 8px"><input data-gphone="${g.id}" value="${esc(g.phone || "")}" placeholder="—" style="width:100%;min-width:110px;${inp}"/></td>
+          <td style="padding:6px 8px"><input data-gemail="${g.id}" value="${esc(g.email || "")}" placeholder="—" style="width:100%;min-width:130px;${inp}"/></td>
           <td style="padding:6px 8px"><input data-gnotes="${g.id}" value="${esc(g.notes || "")}" placeholder="—" style="width:100%;min-width:120px;${inp}"/></td>
           <td style="padding:6px 8px"><button class="btn small ghost danger" data-gdel="${g.id}" title="Remove">✕</button></td></tr>`).join("")}</tbody>
       </table></div>` : `<div class="empty" style="padding:24px">No guests match this filter.</div>`) : `<div class="empty" style="padding:24px">No one on the list yet — add the first name above.</div>`}
@@ -1540,17 +1554,23 @@ function wireCanvas() {
     if (dup) { const by = dup.invited_by_name ? ` (invited by ${dup.invited_by_name})` : ""; if (!confirm(`"${name}" is already on the list${by}. Add again anyway?`)) return; }
     const plus = $("#gPlus").value ? Number($("#gPlus").value) : 0;
     const invited_by_person_id = ($("#gBy") && $("#gBy").value) || null;
-    await post("/api/guests", { name, plus_count: plus, invited_by_person_id }); await refresh(); render();
+    const phone = ($("#gPhone") && $("#gPhone").value.trim()) || null;
+    const email = ($("#gEmail") && $("#gEmail").value.trim()) || null;
+    await post("/api/guests", { name, plus_count: plus, invited_by_person_id, phone, email }); await refresh(); render();
   }; agb.onclick = addG; const gn = $("#gName"); if (gn) gn.onkeydown = (e) => { if (e.key === "Enter") addG(); }; }
   appEl.querySelectorAll("[data-gname]").forEach((i) => (i.onchange = async () => { await patch("/api/guests/" + i.dataset.gname, { name: i.value.trim() || "(unnamed)" }); }));
   appEl.querySelectorAll("[data-gnotes]").forEach((i) => (i.onchange = async () => { await patch("/api/guests/" + i.dataset.gnotes, { notes: i.value.trim() || null }); }));
   appEl.querySelectorAll("[data-gstatus]").forEach((s) => (s.onchange = async () => { await patch("/api/guests/" + s.dataset.gstatus, { status: s.value }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-gby]").forEach((s) => (s.onchange = async () => { await patch("/api/guests/" + s.dataset.gby, { invited_by_person_id: s.value || null }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-gconfirmed]").forEach((c) => (c.onchange = async () => { await patch("/api/guests/" + c.dataset.gconfirmed, { confirmed: c.checked ? 1 : 0 }); await refresh(); render(); }));
+  appEl.querySelectorAll("[data-gphone]").forEach((i) => (i.onchange = async () => { await patch("/api/guests/" + i.dataset.gphone, { phone: i.value.trim() || null }); }));
+  appEl.querySelectorAll("[data-gemail]").forEach((i) => (i.onchange = async () => { await patch("/api/guests/" + i.dataset.gemail, { email: i.value.trim() || null }); }));
   appEl.querySelectorAll("[data-gplus]").forEach((i) => (i.onchange = async () => { await patch("/api/guests/" + i.dataset.gplus, { plus_count: i.value ? Number(i.value) : 0 }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-gdel]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this guest?")) return; await del("/api/guests/" + b.dataset.gdel); await refresh(); render(); }));
   const gfb = $("[data-gfilter-by]"); if (gfb) gfb.onchange = () => { (state.guestFilter = state.guestFilter || { by: "", status: "" }).by = gfb.value; render(); };
   const gfs = $("[data-gfilter-status]"); if (gfs) gfs.onchange = () => { (state.guestFilter = state.guestFilter || { by: "", status: "" }).status = gfs.value; render(); };
+  const gim = $("[data-guest-import]"); if (gim) gim.onclick = async () => { const text = ($("#gPaste").value || "").trim(); if (!text) return toast("Paste a list first"); const r = await post("/api/guests/import", { text, invited_by_person_id: getHostId() || null }); $("#gPaste").value = ""; await refresh(); render(); toast(`Imported — ${r.added || 0} added, ${r.updated || 0} updated`); };
+  const gco = $("[data-guest-copy]"); if (gco) gco.onclick = () => { const txt = (state.data.guests || []).slice().sort((a, b) => (a.name || "").localeCompare(b.name || "")).map((g) => [g.name, g.phone, g.email].filter(Boolean).join(", ")).join("\n"); navigator.clipboard.writeText(txt).then(() => toast("Full list copied")).catch(() => prompt("Copy:", txt)); };
   // events
   const aev = $("[data-add-event]"); if (aev) aev.onclick = () => openEventModal();
   const sev = $("[data-seed-events]"); if (sev) sev.onclick = seedStarterEvents;
