@@ -113,6 +113,8 @@ CREATE TABLE IF NOT EXISTS supplies (
   status         TEXT DEFAULT 'needed',      -- needed | claimed | purchased
   assignee_id    INTEGER REFERENCES people(id) ON DELETE SET NULL, -- primary owner (legacy/fallback)
   assignee_ids   TEXT,                       -- CSV of people ids co-owning this supply
+  qty_have       TEXT,                       -- how much we already have (vs quantity = target/need)
+  tags           TEXT,                       -- free-form CSV tags (build, decor, …)
   notes          TEXT,
   link           TEXT,                       -- where to source it (a shop/product URL)
   created_at     TEXT DEFAULT (datetime('now'))
@@ -210,6 +212,7 @@ CREATE TABLE IF NOT EXISTS inventory (
   area_id          INTEGER REFERENCES areas(id) ON DELETE SET NULL,  -- what it's useful for
   link             TEXT,
   notes            TEXT,
+  tags             TEXT,                       -- free-form CSV tags (build, decor, …)
   created_at       TEXT DEFAULT (datetime('now'))
 );
 

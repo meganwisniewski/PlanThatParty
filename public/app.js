@@ -1226,7 +1226,7 @@ function sourcingView() {
   // filter
   let items = all.filter((s) => {
     if (fstat && s.status !== fstat) return false;
-    if (q) { const hay = [s.item, s.notes, s.quantity, areaName(s.area_id), holderName(s)].join(" ").toLowerCase(); if (!hay.includes(q)) return false; }
+    if (q) { const hay = [s.item, s.notes, s.quantity, s.qty_have, s.tags, areaName(s.area_id), holderName(s)].join(" ").toLowerCase(); if (!hay.includes(q)) return false; }
     return true;
   });
   // sort
@@ -1273,6 +1273,40 @@ function sourcingView() {
       : `<div class="empty">Nothing yet — add the first material above.</div>`}
   </div>`;
 }
+// "have X / need Y" chip when we've noted how much we already have. quantity is
+// the target (free text like "~20 rolls"), qty_have how much is in hand.
+function haveNeedChip(s) {
+  const have = String(s.qty_have || "").trim();
+  if (!have) return "";
+  const need = String(s.quantity || "").trim();
+  const done = s.status === "purchased";
+  const color = done ? "#15803d" : "#b45309";
+  return `<span class="chip" style="background:var(--surface-2);color:${color};font-weight:600" title="How much we already have vs need">📦 ${esc(have)}${need ? ` / ${esc(need)}` : " on hand"}</span>`;
+}
+// Every tag already used on supplies + inventory, for reuse suggestions.
+function collectSupplyTags() {
+  const out = [];
+  const add = (csv) => String(csv || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean).forEach((t) => { if (!out.includes(t)) out.push(t); });
+  (state.data.supplies || []).forEach((s) => add(s.tags));
+  (state.data.inventory || []).forEach((i) => add(i.tags));
+  return out.sort();
+}
+// Spin a supply/inventory item into a to-do, carrying over its name, zone and
+// tags and linking back so it's clear where it came from.
+async function promoteToTask(kind, row) {
+  const label = kind === "inventory" ? "Set up / bring" : "Source";
+  const title = `${label}: ${row.item}`;
+  const bits = [];
+  if (row.quantity) bits.push(`Need: ${row.quantity}`);
+  if (row.qty_have) bits.push(`Have: ${row.qty_have}`);
+  if (row.link) bits.push(row.link);
+  bits.push(`(from ${kind === "inventory" ? "Inventory" : "Sourcing"})`);
+  const payload = { title, description: bits.join("\n"), area_id: row.area_id || null };
+  if (row.tags) payload.tags = row.tags;
+  await post("/api/tasks", payload);
+  await refresh(); render();
+  toast("Added to tasks ✓");
+}
 // List view: full item name on its own line so long names are fully readable.
 function supplyRow(s) {
   const d = state.data;
@@ -1283,31 +1317,75 @@ function supplyRow(s) {
     <textarea data-sitem="${s.id}" rows="${rows}" style="width:100%;font-weight:600;resize:none;line-height:1.35;field-sizing:content;${SUP_INP}">${esc(s.item)}</textarea>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
       <select data-sstatus="${s.id}" style="${SUP_INP};color:${stColor}">${SUPPLY_STATUS.map(([v, l]) => `<option value="${v}" ${s.status === v ? "selected" : ""}>${l}</option>`).join("")}</select>
-      <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px">Qty <input data-sqty="${s.id}" value="${esc(s.quantity || "")}" style="width:56px;${SUP_INP}"/></label>
+      <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px">Need <input data-sqty="${s.id}" value="${esc(s.quantity || "")}" placeholder="~20" style="width:56px;${SUP_INP}"/></label>
+      <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px">Have <input data-sqhave="${s.id}" value="${esc(s.qty_have || "")}" placeholder="0" style="width:52px;${SUP_INP}"/></label>
       <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px">$ <input type="number" inputmode="decimal" data-scost="${s.id}" value="${s.estimated_cost != null ? s.estimated_cost : ""}" style="width:70px;${SUP_INP}"/></label>
       <span style="flex:1;min-width:110px;display:flex">${ownerChip("supply", s)}</span>
       <select data-sarea="${s.id}" style="${SUP_INP};flex:1;min-width:110px">${areaOpts}</select>
-      <button class="btn ghost small danger" data-sdel="${s.id}">Remove</button>
     </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">🏷️<input data-stags="${s.id}" value="${esc(s.tags || "")}" placeholder="Tags (comma-separated) — e.g. build, decor" style="flex:1;min-width:0;${SUP_INP}"/></div>
     <div style="display:flex;gap:8px;align-items:center;margin-top:8px">🔗<input data-slink="${s.id}" value="${esc(s.link || "")}" placeholder="Where to buy — paste a link" style="flex:1;min-width:0;${SUP_INP}"/>${s.link ? `<a class="btn small ghost" href="${esc(s.link)}" target="_blank" rel="noopener">Open</a>` : ""}</div>
     ${s.notes ? `<div style="display:flex;gap:8px;align-items:center;margin-top:8px">📝<input data-snotes="${s.id}" value="${esc(s.notes)}" placeholder="Notes" style="flex:1;min-width:0;${SUP_INP}"/></div>` : `<div style="margin-top:8px"><input data-snotes="${s.id}" value="" placeholder="📝 Notes" style="width:100%;${SUP_INP}"/></div>`}
+    <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap"><button class="btn ghost small" data-supply-task="${s.id}">＋ Turn into task</button><button class="btn ghost small danger" data-sdel="${s.id}">Remove</button></div>
   </div>`;
 }
+// Card view is read-only at a glance — tap Edit to change anything. (List view
+// stays fully inline-editable for quick tweaks.)
 function supplyCard(s) {
   const d = state.data;
-  const areaOpts = `<option value="">— zone —</option>` + d.areas.map((a) => `<option value="${a.id}" ${s.area_id == a.id ? "selected" : ""}>${a.emoji || ""} ${esc(a.name)}</option>`).join("");
+  const st = SUPPLY_STATUS.find(([v]) => v === s.status) || SUPPLY_STATUS[0];
+  const area = (d.areas || []).find((a) => a.id == s.area_id);
+  const oids = assigneeIdsOf(s);
+  const owner = oids.length ? `🙋 ${esc(assigneeLabel(oids))}` : "";
   return `<div class="pcard">
-    <div style="display:flex;gap:8px;align-items:center"><input data-sitem="${s.id}" value="${esc(s.item)}" style="flex:1;min-width:0;font-weight:600;${SUP_INP}"/><select data-sstatus="${s.id}" style="${SUP_INP};color:${SS_COLOR[s.status] || ""}">${SUPPLY_STATUS.map(([v, l]) => `<option value="${v}" ${s.status === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-      <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px">Qty <input data-sqty="${s.id}" value="${esc(s.quantity || "")}" style="width:56px;${SUP_INP}"/></label>
-      <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px">$ <input type="number" inputmode="decimal" data-scost="${s.id}" value="${s.estimated_cost != null ? s.estimated_cost : ""}" style="width:74px;${SUP_INP}"/></label>
-      <span style="flex:1;min-width:0;display:flex">${ownerChip("supply", s)}</span>
-      <select data-sarea="${s.id}" style="${SUP_INP};flex:1;min-width:0">${areaOpts}</select>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><h3 style="margin:0;font-size:15px;flex:1;min-width:0">${esc(s.item)}</h3><span class="chip" style="color:${st[2]}">${st[1]}</span></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center">
+      ${s.quantity ? `<span class="chip" style="background:var(--surface-2)">Need ${esc(s.quantity)}</span>` : ""}
+      ${haveNeedChip(s)}
+      ${s.estimated_cost != null ? `<span class="chip" style="background:var(--surface-2)">$${esc(s.estimated_cost)}</span>` : ""}
+      ${area ? `<span class="chip" style="background:var(--surface-2)">${area.emoji || ""} ${esc(area.name)}</span>` : ""}
     </div>
-    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">🔗<input data-slink="${s.id}" value="${esc(s.link || "")}" placeholder="Where to buy — paste a link" style="flex:1;min-width:0;${SUP_INP}"/>${s.link ? `<a class="btn small ghost" href="${esc(s.link)}" target="_blank" rel="noopener">Open</a>` : ""}</div>
-    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">📝<input data-snotes="${s.id}" value="${esc(s.notes || "")}" placeholder="Notes" style="flex:1;min-width:0;${SUP_INP}"/></div>
-    <div style="margin-top:10px"><button class="btn ghost small danger" data-sdel="${s.id}">Remove</button></div>
+    ${owner ? `<div class="chan" style="margin-top:8px">${owner}</div>` : ""}
+    ${s.tags ? `<div style="margin-top:8px">${tagChipsHtml(s.tags)}</div>` : ""}
+    ${s.notes ? `<div class="pnote">${esc(s.notes)}</div>` : ""}
+    ${s.link ? `<div style="margin-top:8px"><a class="btn small ghost" href="${esc(s.link)}" target="_blank" rel="noopener">🔗 Where to buy</a></div>` : ""}
+    <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap"><button class="btn ghost small" data-edit-supply="${s.id}">Edit</button><button class="btn ghost small" data-supply-task="${s.id}">＋ Task</button><button class="btn ghost small danger" data-sdel="${s.id}">Remove</button></div>
   </div>`;
+}
+// Full editor behind the card view's Edit button — everything the inline list
+// row can change, in one calm form.
+function openSupplyModal(id) {
+  const s = (state.data.supplies || []).find((x) => x.id == id);
+  if (!s) return;
+  const d = state.data;
+  const stOpts = SUPPLY_STATUS.map(([v, l]) => `<option value="${v}" ${s.status === v ? "selected" : ""}>${l}</option>`).join("");
+  const areaOpts = `<option value="">— zone —</option>` + d.areas.map((a) => `<option value="${a.id}" ${s.area_id == a.id ? "selected" : ""}>${a.emoji || ""} ${esc(a.name)}</option>`).join("");
+  const oids = assigneeIdsOf(s);
+  const m = modal(`<h3>Edit material</h3>
+    <label class="field"><span>Item</span><input id="suItem" value="${esc(s.item || "")}"/></label>
+    <div class="field two"><label><span>Status</span><select id="suStatus">${stOpts}</select></label><label><span>Zone</span><select id="suArea">${areaOpts}</select></label></div>
+    <div class="field two"><label><span>Need (how many)</span><input id="suQty" value="${esc(s.quantity || "")}" placeholder="e.g. ~20 rolls"/></label><label><span>Have already</span><input id="suHave" value="${esc(s.qty_have || "")}" placeholder="e.g. 2"/></label></div>
+    <label class="field"><span>Est. cost ($)</span><input id="suCost" type="number" inputmode="decimal" value="${s.estimated_cost != null ? s.estimated_cost : ""}"/></label>
+    <label class="field"><span>Who's on it</span></label>${ownerChecklist(oids, "sowner")}
+    <label class="field" style="margin-top:10px"><span>Tags</span></label><div id="suTags"></div>
+    <label class="field" style="margin-top:10px"><span>Where to buy (link)</span><input id="suLink" value="${esc(s.link || "")}" placeholder="Paste a link"/></label>
+    <label class="field"><span>Notes</span><textarea id="suNotes" rows="2">${esc(s.notes || "")}</textarea></label>`,
+    async () => {
+      const item = $("#suItem").value.trim();
+      if (!item) return toast("Add an item name");
+      const tagEl = m.el.querySelector("#suTags");
+      const payload = {
+        item, status: $("#suStatus").value, area_id: $("#suArea").value || null,
+        quantity: $("#suQty").value.trim() || null, qty_have: $("#suHave").value.trim() || null,
+        estimated_cost: $("#suCost").value ? Number($("#suCost").value) : null,
+        assignee_ids: checkedIds("sowner"),
+        tags: (tagEl && tagEl._getTags) ? tagEl._getTags().join(", ") : (s.tags || null),
+        link: $("#suLink").value.trim() || null, notes: $("#suNotes").value.trim() || null,
+      };
+      await patch("/api/supplies/" + id, payload);
+      await refresh(); render(); toast("Saved");
+    });
+  mountTagInput(m.el.querySelector("#suTags"), String(s.tags || "").split(",").map((x) => x.trim()).filter(Boolean), collectSupplyTags());
 }
 
 /* ---------------- INVENTORY (what we have / can access — host-only) ---------------- */
@@ -1339,9 +1417,10 @@ function inventoryCard(it) {
   return `<div class="pcard">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-size:20px">${IC_EMOJI[it.category] || "📦"}</span><h3 style="margin:0;font-size:15px">${esc(it.item)}</h3>${it.quantity ? `<span class="chip">${esc(it.quantity)}</span>` : ""}<div class="grow"></div><span class="chip" style="color:${st[2]}">${st[1]}</span></div>
     <div class="chan" style="margin:8px 0 0">Held by ${invHolder(it)}${it.area_name ? ` · for ${it.area_emoji || ""} ${esc(it.area_name)}` : ""}</div>
+    ${it.tags ? `<div style="margin-top:8px">${tagChipsHtml(it.tags)}</div>` : ""}
     ${it.notes ? `<div class="pnote">${esc(it.notes)}</div>` : ""}
     ${it.link ? `<div style="margin-top:8px"><a class="btn small ghost" href="${esc(it.link)}" target="_blank" rel="noopener">🔗 Reference</a></div>` : ""}
-    <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap"><button class="btn ghost small" data-edit-inv="${it.id}">Edit</button><button class="btn ghost small danger" data-del-inv="${it.id}">Remove</button></div>
+    <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap"><button class="btn ghost small" data-edit-inv="${it.id}">Edit</button><button class="btn ghost small" data-inv-task="${it.id}">＋ Task</button><button class="btn ghost small danger" data-del-inv="${it.id}">Remove</button></div>
   </div>`;
 }
 function openInventoryModal(id, prefill) {
@@ -1352,22 +1431,25 @@ function openInventoryModal(id, prefill) {
   const areaOpts = `<option value="">— useful for (optional) —</option>` + d.areas.map((a) => `<option value="${a.id}" ${it.area_id == a.id ? "selected" : ""}>${a.emoji || ""} ${esc(a.name)}</option>`).join("");
   const startExternal = !it.holder_person_id && !!it.holder_name;
   const holderOpts = `<option value="">— nobody yet —</option>` + d.people.map((p) => `<option value="${p.id}" ${it.holder_person_id == p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("") + `<option value="__ext" ${startExternal ? "selected" : ""}>Someone else (not on the crew)…</option>`;
-  modal(`<h3>${id ? "Edit item" : "Add to inventory"}</h3>
+  const m = modal(`<h3>${id ? "Edit item" : "Add to inventory"}</h3>
     <label class="field"><span>Item</span><input id="ivItem" value="${esc(it.item || "")}" placeholder="e.g. Fog machine, 6 coolers, mannequin parts"/></label>
     <div class="field two"><label><span>Type</span><select id="ivCat">${catOpts}</select></label><label><span>How many / how much</span><input id="ivQty" value="${esc(it.quantity || "")}" placeholder="e.g. 2, a bunch"/></label></div>
     <div class="field two"><label><span>Status</span><select id="ivStatus">${stOpts}</select></label><label><span>Useful for</span><select id="ivArea">${areaOpts}</select></label></div>
     <label class="field"><span>Who has it / access</span><select id="ivHolder">${holderOpts}</select></label>
     <label class="field" id="ivExtWrap" style="${startExternal ? "" : "display:none"}"><span>Their name (friend, friend-of-friend…)</span><input id="ivExt" value="${esc(startExternal ? it.holder_name : "")}" placeholder="e.g. Jake — Sarah's friend"/></label>
     <label class="field"><span>Link (optional)</span><input id="ivLink" value="${esc(it.link || "")}" placeholder="Photo or product link"/></label>
-    <label class="field"><span>Notes</span><textarea id="ivNotes" rows="2" placeholder="Condition, pickup details, anything handy…">${esc(it.notes || "")}</textarea></label>`,
+    <label class="field"><span>Tags</span></label><div id="ivTags"></div>
+    <label class="field" style="margin-top:10px"><span>Notes</span><textarea id="ivNotes" rows="2" placeholder="Condition, pickup details, anything handy…">${esc(it.notes || "")}</textarea></label>`,
     async () => {
       const holderSel = $("#ivHolder").value;
-      const payload = { item: $("#ivItem").value.trim(), category: $("#ivCat").value || null, quantity: $("#ivQty").value.trim() || null, status: $("#ivStatus").value, area_id: $("#ivArea").value || null, link: $("#ivLink").value.trim() || null, notes: $("#ivNotes").value.trim() || null, holder_person_id: (holderSel && holderSel !== "__ext") ? holderSel : null, holder_name: holderSel === "__ext" ? ($("#ivExt").value.trim() || null) : null };
+      const tagEl = m.el.querySelector("#ivTags");
+      const payload = { item: $("#ivItem").value.trim(), category: $("#ivCat").value || null, quantity: $("#ivQty").value.trim() || null, status: $("#ivStatus").value, area_id: $("#ivArea").value || null, link: $("#ivLink").value.trim() || null, tags: (tagEl && tagEl._getTags) ? tagEl._getTags().join(", ") : (it.tags || null), notes: $("#ivNotes").value.trim() || null, holder_person_id: (holderSel && holderSel !== "__ext") ? holderSel : null, holder_name: holderSel === "__ext" ? ($("#ivExt").value.trim() || null) : null };
       if (!payload.item) return toast("Add an item name");
       if (id) await patch("/api/inventory/" + id, payload); else await post("/api/inventory", payload);
       await refresh(); render(); toast("Saved");
     });
   const hs = $("#ivHolder"); if (hs) hs.onchange = () => { const w = $("#ivExtWrap"); if (w) w.style.display = hs.value === "__ext" ? "" : "none"; };
+  mountTagInput(m.el.querySelector("#ivTags"), String(it.tags || "").split(",").map((x) => x.trim()).filter(Boolean), collectSupplyTags());
 }
 
 /* ---- per-host guided intake: you ask, so hosts don't self-input ---- */
@@ -1500,15 +1582,16 @@ function personVCard(p) {
   lines.push("END:VCARD");
   return lines.join("\r\n");
 }
-// Hand a vCard to the browser WITHOUT forcing a download, so it offers to
-// "Open with Contacts" (one click → Contacts import) instead of dumping a .vcf
-// into some folder you then have to hunt for. Falls back to a download if the
-// browser blocks opening it.
+// Save a .vcf with a clean, recognizable filename. A browser can't push a card
+// straight into the Contacts app — that OS hand-off always needs one click from
+// you — so the reliable path is: save this file, then double-click it and macOS
+// opens it in Contacts with an "Add" button. Naming it well means it's not a
+// random hash you have to hunt for in Downloads.
 function openVCard(text, name) {
+  const safe = String(name || "contact").replace(/[^\w .-]+/g, "").trim().replace(/\s+/g, "-") || "contact";
   const url = URL.createObjectURL(new Blob([text], { type: "text/vcard;charset=utf-8" }));
   const a = document.createElement("a");
-  a.href = url; a.target = "_blank"; a.rel = "noopener";
-  a.setAttribute("type", "text/vcard");
+  a.href = url; a.download = safe + ".vcf";
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 15000);
 }
@@ -1516,14 +1599,14 @@ function downloadVCard(id) {
   const p = (state.data.people || []).find((x) => x.id == id);
   if (!p) return;
   openVCard(personVCard(p), (p.name || "contact"));
-  toast("If asked, choose “Open with Contacts”");
+  toast("Saved — double-click the .vcf to add it to Contacts");
 }
-// One vCard with the whole crew — open once to import everyone into Contacts.
+// One vCard with the whole crew — double-click once to import everyone.
 function downloadAllVCards() {
   const people = (state.data.people || []).filter((p) => p.phone || p.email);
   if (!people.length) return toast("No phone/email on file yet");
-  openVCard(people.map(personVCard).join("\r\n"), "crew");
-  toast(`${people.length} contacts — choose “Open with Contacts”`);
+  openVCard(people.map(personVCard).join("\r\n"), "party-crew");
+  toast(`${people.length} contacts saved — double-click the .vcf to add them`);
 }
 
 /* ---------------- SETTINGS ---------------- */
@@ -1664,11 +1747,16 @@ function wireCanvas() {
   appEl.querySelectorAll("[data-sitem]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.sitem, { item: i.value.trim() || "(unnamed)" }); }));
   appEl.querySelectorAll("[data-sstatus]").forEach((s) => (s.onchange = async () => { await patch("/api/supplies/" + s.dataset.sstatus, { status: s.value }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-sqty]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.sqty, { quantity: i.value.trim() || null }); }));
+  appEl.querySelectorAll("[data-sqhave]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.sqhave, { qty_have: i.value.trim() || null }); await refresh(); render(); }));
+  appEl.querySelectorAll("[data-stags]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.stags, { tags: i.value.trim() || null }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-scost]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.scost, { estimated_cost: i.value ? Number(i.value) : null }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-sarea]").forEach((s) => (s.onchange = async () => { await patch("/api/supplies/" + s.dataset.sarea, { area_id: s.value || null }); }));
   appEl.querySelectorAll("[data-slink]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.slink, { link: i.value.trim() || null }); await refresh(); render(); }));
   appEl.querySelectorAll("[data-snotes]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.snotes, { notes: i.value.trim() || null }); }));
   appEl.querySelectorAll("[data-sdel]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this item?")) return; await del("/api/supplies/" + b.dataset.sdel); await refresh(); render(); }));
+  appEl.querySelectorAll("[data-edit-supply]").forEach((b) => (b.onclick = () => openSupplyModal(Number(b.dataset.editSupply))));
+  appEl.querySelectorAll("[data-supply-task]").forEach((b) => (b.onclick = () => { const s = (state.data.supplies || []).find((x) => x.id == b.dataset.supplyTask); if (s) promoteToTask("supply", s); }));
+  appEl.querySelectorAll("[data-inv-task]").forEach((b) => (b.onclick = () => { const it = (state.data.inventory || []).find((x) => x.id == b.dataset.invTask); if (it) promoteToTask("inventory", it); }));
   appEl.querySelectorAll("[data-sourceview]").forEach((b) => (b.onclick = () => { state.sourceView = b.dataset.sourceview; render(); }));
   const soS = $("#soSearch"); if (soS) soS.onchange = () => { state.sourceQ = soS.value.trim(); render(); };
   const soF = $("[data-sofilter]"); if (soF) soF.onchange = () => { state.sourceStatus = soF.value; render(); };

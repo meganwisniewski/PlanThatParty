@@ -981,8 +981,8 @@ async function api(request, env, path) {
       if (!b.item) return err("Item required.");
       const na = normAssignees(b) || { csv: null, first: null };
       const r = await env.DB.prepare(
-        `INSERT INTO supplies (area_id, item, quantity, estimated_cost, status, assignee_id, assignee_ids, notes, link)
-         VALUES (?,?,?,?,?,?,?,?,?)`
+        `INSERT INTO supplies (area_id, item, quantity, estimated_cost, status, assignee_id, assignee_ids, qty_have, tags, notes, link)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`
       )
         .bind(
           b.area_id || null,
@@ -992,6 +992,8 @@ async function api(request, env, path) {
           b.status || "needed",
           na.first,
           na.csv,
+          b.qty_have || null,
+          normalizeTags(b.tags),
           b.notes || null,
           b.link ? normalizeUrl(b.link) : null
         )
@@ -1001,12 +1003,13 @@ async function api(request, env, path) {
     if (method === "PATCH" && id) {
       const b = await body(request);
       if ("link" in b) b.link = b.link ? normalizeUrl(b.link) : null;
+      if ("tags" in b) b.tags = normalizeTags(b.tags);
       if ("assignee_ids" in b || "assignee_id" in b) { const na = normAssignees(b); b.assignee_id = na.first; b.assignee_ids = na.csv; }
       await updateRow(
         env,
         "supplies",
         id,
-        pick(b, ["area_id", "item", "quantity", "estimated_cost", "status", "assignee_id", "assignee_ids", "notes", "link"])
+        pick(b, ["area_id", "item", "quantity", "estimated_cost", "status", "assignee_id", "assignee_ids", "qty_have", "tags", "notes", "link"])
       );
       return json({ ok: true });
     }
@@ -1018,23 +1021,24 @@ async function api(request, env, path) {
 
   // ---------- inventory (things we already have / can access — host-only) ----------
   if (resource === "inventory") {
-    const INV = ["item", "category", "quantity", "status", "holder_person_id", "holder_name", "area_id", "link", "notes"];
+    const INV = ["item", "category", "quantity", "status", "holder_person_id", "holder_name", "area_id", "link", "tags", "notes"];
     if (method === "POST") {
       const b = await body(request);
       if (!b.item || !b.item.trim()) return err("Item required.");
       const r = await env.DB.prepare(
-        `INSERT INTO inventory (item, category, quantity, status, holder_person_id, holder_name, area_id, link, notes)
-         VALUES (?,?,?,?,?,?,?,?,?)`
+        `INSERT INTO inventory (item, category, quantity, status, holder_person_id, holder_name, area_id, link, tags, notes)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`
       ).bind(
         b.item.trim(), b.category || null, b.quantity || null, b.status || "have",
         b.holder_person_id || null, b.holder_name || null, b.area_id || null,
-        b.link ? normalizeUrl(b.link) : null, b.notes || null
+        b.link ? normalizeUrl(b.link) : null, normalizeTags(b.tags), b.notes || null
       ).run();
       return json({ id: r.meta.last_row_id }, 201);
     }
     if (method === "PATCH" && id) {
       const b = await body(request);
       if ("link" in b) b.link = b.link ? normalizeUrl(b.link) : null;
+      if ("tags" in b) b.tags = normalizeTags(b.tags);
       await updateRow(env, "inventory", id, pick(b, INV));
       return json({ ok: true });
     }
