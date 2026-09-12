@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS events (
   end_time    TEXT,
   location    TEXT,
   notes       TEXT,
+  assignee_id INTEGER REFERENCES people(id) ON DELETE SET NULL, -- who's hosting / running it
   sort_order  INTEGER DEFAULT 0,
   created_at  TEXT DEFAULT (datetime('now'))
 );

@@ -546,7 +546,7 @@ async function api(request, env, path) {
       env.DB.prepare("SELECT g.*, p.name AS invited_by_name FROM guests g LEFT JOIN people p ON p.id = g.invited_by_person_id ORDER BY g.created_at DESC").all(),
       env.DB.prepare("SELECT * FROM checklist ORDER BY sort_order, id").all(),
       env.DB.prepare("SELECT * FROM zones ORDER BY sort_order, id").all(),
-      env.DB.prepare("SELECT * FROM events ORDER BY (event_date IS NULL), event_date, start_time, sort_order, id").all(),
+      env.DB.prepare("SELECT e.*, p.name AS assignee_name FROM events e LEFT JOIN people p ON p.id = e.assignee_id ORDER BY (e.event_date IS NULL), e.event_date, e.start_time, e.sort_order, e.id").all(),
       env.DB.prepare(`SELECT i.*, p.name AS holder_person_name, a.name AS area_name, a.emoji AS area_emoji FROM inventory i LEFT JOIN people p ON p.id = i.holder_person_id LEFT JOIN areas a ON a.id = i.area_id ORDER BY i.created_at DESC`).all(),
     ]);
     return json({
@@ -640,9 +640,9 @@ async function api(request, env, path) {
   if (resource === "events") {
     const gate = await requireAdmin(request, env);
     if (gate) return gate;
-    const EV_FIELDS = ["title", "kind", "event_date", "start_time", "end_time", "location", "notes", "sort_order"];
+    const EV_FIELDS = ["title", "kind", "event_date", "start_time", "end_time", "location", "notes", "sort_order", "assignee_id"];
     if (method === "GET") {
-      const rows = (await env.DB.prepare("SELECT * FROM events ORDER BY (event_date IS NULL), event_date, start_time, sort_order, id").all()).results;
+      const rows = (await env.DB.prepare("SELECT e.*, p.name AS assignee_name FROM events e LEFT JOIN people p ON p.id = e.assignee_id ORDER BY (e.event_date IS NULL), e.event_date, e.start_time, e.sort_order, e.id").all()).results;
       return json(rows);
     }
     if (method === "POST") {
@@ -655,8 +655,8 @@ async function api(request, env, path) {
       }
       if (!b.title || !b.title.trim()) return err("Event name required.");
       const r = await env.DB.prepare(
-        "INSERT INTO events (title, kind, event_date, start_time, end_time, location, notes, sort_order) VALUES (?,?,?,?,?,?,?,?)"
-      ).bind(b.title.trim(), b.kind || null, b.event_date || null, b.start_time || null, b.end_time || null, b.location || null, b.notes || null, b.sort_order || 0).run();
+        "INSERT INTO events (title, kind, event_date, start_time, end_time, location, notes, sort_order, assignee_id) VALUES (?,?,?,?,?,?,?,?,?)"
+      ).bind(b.title.trim(), b.kind || null, b.event_date || null, b.start_time || null, b.end_time || null, b.location || null, b.notes || null, b.sort_order || 0, b.assignee_id || null).run();
       return json({ id: r.meta.last_row_id }, 201);
     }
     if (method === "PATCH" && id) {

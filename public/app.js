@@ -1114,6 +1114,7 @@ function eventsView() {
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h3 style="margin:0;font-size:15px">${esc(e.title)}</h3>${e.kind ? `<span class="chip">${esc(EK_LABEL[e.kind] || e.kind)}</span>` : ""}</div>
         <div class="evwhen">🗓️ ${when}${time ? ` · ⏰ ${time}` : ""}${e.location ? ` · 📍 ${esc(e.location)}` : ""}</div>
+        ${e.assignee_name ? `<div class="evwhen">🧑 Hosted by <b>${esc(e.assignee_name)}</b></div>` : ""}
         ${e.notes ? `<div class="evnotes">${esc(e.notes)}</div>` : ""}
         <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
           <button class="btn small ghost" data-edit-event="${e.id}">Edit</button>
@@ -1137,14 +1138,16 @@ function eventsView() {
 function openEventModal(id) {
   const e = id ? (state.data.events || []).find((x) => x.id == id) || {} : {};
   const kindOpts = `<option value="">—</option>` + EVENT_KINDS.map(([k, em, l]) => `<option value="${k}" ${e.kind === k ? "selected" : ""}>${em} ${l}</option>`).join("");
+  const whoOpts = `<option value="">— nobody yet —</option>` + (state.data.people || []).map((p) => `<option value="${p.id}" ${e.assignee_id == p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("");
   modal(`<h3>${id ? "Edit event" : "Add event"}</h3>
     <label class="field"><span>Name</span><input id="evName" value="${esc(e.title || "")}" placeholder="e.g. Pumpkin carving day"/></label>
     <div class="field two"><label><span>Type</span><select id="evKind">${kindOpts}</select></label><label><span>Date</span><input id="evDate" type="date" value="${esc(e.event_date || "")}"/></label></div>
     <div class="field two"><label><span>Start time</span><input id="evStart" value="${esc(e.start_time || "")}" placeholder="e.g. 6:00 PM"/></label><label><span>End time</span><input id="evEnd" value="${esc(e.end_time || "")}" placeholder="optional"/></label></div>
+    <label class="field"><span>Who's hosting / running it</span><select id="evWho">${whoOpts}</select></label>
     <label class="field"><span>Location</span><input id="evLoc" value="${esc(e.location || "")}" placeholder="optional"/></label>
     <label class="field"><span>Notes</span><textarea id="evNotes" rows="2" placeholder="What's happening, what to bring…">${esc(e.notes || "")}</textarea></label>`,
     async () => {
-      const payload = { title: $("#evName").value.trim(), kind: $("#evKind").value || null, event_date: $("#evDate").value || null, start_time: $("#evStart").value.trim() || null, end_time: $("#evEnd").value.trim() || null, location: $("#evLoc").value.trim() || null, notes: $("#evNotes").value.trim() || null };
+      const payload = { title: $("#evName").value.trim(), kind: $("#evKind").value || null, event_date: $("#evDate").value || null, start_time: $("#evStart").value.trim() || null, end_time: $("#evEnd").value.trim() || null, assignee_id: $("#evWho").value || null, location: $("#evLoc").value.trim() || null, notes: $("#evNotes").value.trim() || null };
       if (!payload.title) return toast("Add a name");
       if (id) await patch("/api/events/" + id, payload); else await post("/api/events", payload);
       await refresh(); render(); toast("Saved");
@@ -1171,16 +1174,37 @@ const SS_COLOR = Object.fromEntries(SUPPLY_STATUS.map(([v, l, c]) => [v, c]));
 const SUP_INP = "border:1px solid var(--line-strong);border-radius:8px;padding:7px 9px;font:inherit;background:var(--surface)";
 function sourcingView() {
   const d = state.data;
-  const items = (d.supplies || []).slice();
-  const total = items.reduce((s, x) => s + (Number(x.estimated_cost) || 0), 0);
-  const need = items.filter((x) => x.status !== "purchased").length;
-  const ord = { needed: 0, claimed: 1, purchased: 2 };
-  items.sort((a, b) => (ord[a.status] ?? 0) - (ord[b.status] ?? 0) || a.id - b.id);
+  const all = (d.supplies || []).slice();
+  const total = all.reduce((s, x) => s + (Number(x.estimated_cost) || 0), 0);
+  const need = all.filter((x) => x.status !== "purchased").length;
   const view = state.sourceView || "list";
+  const q = (state.sourceQ || "").toLowerCase();
+  const fstat = state.sourceStatus || "";
+  const sort = state.sourceSort || "status";
+  const areaName = (aid) => { const a = (d.areas || []).find((x) => x.id == aid); return a ? a.name : ""; };
+  const holderName = (s) => { const p = (d.people || []).find((x) => x.id == s.assignee_id); return p ? p.name : ""; };
+  // filter
+  let items = all.filter((s) => {
+    if (fstat && s.status !== fstat) return false;
+    if (q) { const hay = [s.item, s.notes, s.quantity, areaName(s.area_id), holderName(s)].join(" ").toLowerCase(); if (!hay.includes(q)) return false; }
+    return true;
+  });
+  // sort
+  const ord = { needed: 0, claimed: 1, purchased: 2 };
+  const cmp = {
+    status: (a, b) => (ord[a.status] ?? 0) - (ord[b.status] ?? 0) || a.id - b.id,
+    name: (a, b) => (a.item || "").localeCompare(b.item || ""),
+    cost: (a, b) => (Number(b.estimated_cost) || 0) - (Number(a.estimated_cost) || 0),
+    zone: (a, b) => areaName(a.area_id).localeCompare(areaName(b.area_id)) || a.id - b.id,
+    added: (a, b) => b.id - a.id,
+  }[sort] || null;
+  if (cmp) items.sort(cmp);
+  const filtered = q || fstat;
+  const selOpt = (v, cur, label) => `<option value="${v}" ${cur === v ? "selected" : ""}>${label}</option>`;
   return `<div style="max-width:820px">
     <div style="margin-bottom:8px"><h1 style="margin:0;font-size:18px">🛒 Sourcing</h1><div class="countdown">Materials to track down — foam, pool noodles, floor mats, and the rest. Note where to buy, who's on it, and the cost.</div></div>
     <div class="facts" style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:14px">
-      <div><div style="font-size:24px;font-weight:800">${items.length}</div><div class="meta">items</div></div>
+      <div><div style="font-size:24px;font-weight:800">${all.length}</div><div class="meta">items</div></div>
       <div><div style="font-size:24px;font-weight:800;color:var(--accent-strong)">${need}</div><div class="meta">still to get</div></div>
       <div><div style="font-size:24px;font-weight:800">$${total.toFixed(0)}</div><div class="meta">est. cost</div></div>
     </div>
@@ -1190,14 +1214,22 @@ function sourcingView() {
       <input id="soCost" type="number" inputmode="decimal" placeholder="$ est" style="width:84px;${SUP_INP}"/>
       <button class="btn primary" data-add-supply>Add</button>
     </div></div>
-    <div style="display:flex;gap:6px;margin-bottom:12px">
-      <button class="btn small ${view === "list" ? "primary" : "ghost"}" data-sourceview="list">☰ List</button>
-      <button class="btn small ${view === "cards" ? "primary" : "ghost"}" data-sourceview="cards">▦ Cards</button>
+    <div class="facts" style="margin-bottom:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <input id="soSearch" value="${esc(state.sourceQ || "")}" placeholder="🔎 Search items, notes, zone… (Enter)" style="flex:1;min-width:180px;${SUP_INP}"/>
+      <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px">Status <select data-sofilter style="${SUP_INP}">${selOpt("", fstat, "All")}${SUPPLY_STATUS.map(([v, l]) => selOpt(v, fstat, l)).join("")}</select></label>
+      <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px">Sort <select data-sosort style="${SUP_INP}">${selOpt("status", sort, "Status")}${selOpt("name", sort, "Name A–Z")}${selOpt("cost", sort, "Cost ↓")}${selOpt("zone", sort, "Zone")}${selOpt("added", sort, "Newest")}</select></label>
+      <div style="display:flex;gap:6px">
+        <button class="btn small ${view === "list" ? "primary" : "ghost"}" data-sourceview="list" title="List">☰</button>
+        <button class="btn small ${view === "cards" ? "primary" : "ghost"}" data-sourceview="cards" title="Cards">▦</button>
+      </div>
+      ${filtered ? `<span class="chip">${items.length} of ${all.length}</span>` : ""}
     </div>
-    ${items.length
-      ? (view === "list"
-        ? `<div style="display:flex;flex-direction:column;gap:8px">${items.map(supplyRow).join("")}</div>`
-        : `<div class="cards">${items.map(supplyCard).join("")}</div>`)
+    ${all.length
+      ? (items.length
+        ? (view === "list"
+          ? `<div style="display:flex;flex-direction:column;gap:8px">${items.map(supplyRow).join("")}</div>`
+          : `<div class="cards">${items.map(supplyCard).join("")}</div>`)
+        : `<div class="empty">No materials match your search / filter.</div>`)
       : `<div class="empty">Nothing yet — add the first material above.</div>`}
   </div>`;
 }
@@ -1588,6 +1620,9 @@ function wireCanvas() {
   appEl.querySelectorAll("[data-snotes]").forEach((i) => (i.onchange = async () => { await patch("/api/supplies/" + i.dataset.snotes, { notes: i.value.trim() || null }); }));
   appEl.querySelectorAll("[data-sdel]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this item?")) return; await del("/api/supplies/" + b.dataset.sdel); await refresh(); render(); }));
   appEl.querySelectorAll("[data-sourceview]").forEach((b) => (b.onclick = () => { state.sourceView = b.dataset.sourceview; render(); }));
+  const soS = $("#soSearch"); if (soS) soS.onchange = () => { state.sourceQ = soS.value.trim(); render(); };
+  const soF = $("[data-sofilter]"); if (soF) soF.onchange = () => { state.sourceStatus = soF.value; render(); };
+  const soO = $("[data-sosort]"); if (soO) soO.onchange = () => { state.sourceSort = soO.value; render(); };
   // inventory
   const ainv = $("[data-add-inv]"); if (ainv) ainv.onclick = () => openInventoryModal();
   appEl.querySelectorAll("[data-edit-inv]").forEach((b) => (b.onclick = () => openInventoryModal(Number(b.dataset.editInv))));
